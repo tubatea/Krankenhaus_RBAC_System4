@@ -1,0 +1,1022 @@
+<html>
+<head>
+<title>app.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+app.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">Flask</span><span class="s2">, </span><span class="s1">render_template</span><span class="s2">, </span><span class="s1">request</span><span class="s2">, </span><span class="s1">redirect</span><span class="s2">, </span><span class="s1">session</span><span class="s2">, </span><span class="s1">url_for  </span><span class="s3"># Flask-Werkzeuge für Webseiten, Formulare, Login und Weiterleitungen</span>
+<span class="s0">import </span><span class="s1">sqlite3  </span><span class="s3"># SQLite wird für die Datenbank verwendet</span>
+<span class="s0">from </span><span class="s1">database </span><span class="s0">import </span><span class="s1">create_database  </span><span class="s3"># importiert unsere Funktion aus database.py</span>
+
+
+<span class="s1">app </span><span class="s2">= </span><span class="s1">Flask</span><span class="s2">(</span><span class="s1">__name__</span><span class="s2">)  </span><span class="s3"># erstellt die Flask-Webanwendung</span>
+<span class="s1">app</span><span class="s2">.</span><span class="s1">secret_key </span><span class="s2">= </span><span class="s4">&quot;secret_key_for_login&quot;  </span><span class="s3"># wird benötigt, damit Flask eingeloggte Benutzer speichern kann</span>
+
+<span class="s1">create_database</span><span class="s2">()  </span><span class="s3"># stellt sicher, dass die Datenbank und Tabellen existieren</span>
+
+
+<span class="s0">def </span><span class="s1">get_db_connection</span><span class="s2">():</span>
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">sqlite3</span><span class="s2">.</span><span class="s1">connect</span><span class="s2">(</span><span class="s4">&quot;hospital.db&quot;</span><span class="s2">)  </span><span class="s3"># verbindet sich mit der Datenbankdatei</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">row_factory </span><span class="s2">= </span><span class="s1">sqlite3</span><span class="s2">.</span><span class="s1">Row  </span><span class="s3"># erlaubt Zugriff auf Spaltennamen, z. B. user[&quot;role&quot;]</span>
+    <span class="s0">return </span><span class="s1">connection  </span><span class="s3"># gibt die Datenbankverbindung zurück</span>
+
+<span class="s0">def </span><span class="s1">get_role_label</span><span class="s2">(</span><span class="s1">role</span><span class="s2">):</span>
+    <span class="s3"># Übersetzt technische Rollennamen in verständliche deutsche Namen</span>
+    <span class="s1">role_labels </span><span class="s2">= {</span>
+        <span class="s4">&quot;doctor&quot;</span><span class="s2">: </span><span class="s4">&quot;Arzt / Ärztin&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;nurse&quot;</span><span class="s2">: </span><span class="s4">&quot;Pflegekraft&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;lab&quot;</span><span class="s2">: </span><span class="s4">&quot;Laborpersonal&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;admin&quot;</span><span class="s2">: </span><span class="s4">&quot;Administrator&quot;</span>
+    <span class="s2">}</span>
+
+    <span class="s0">return </span><span class="s1">role_labels</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">role</span><span class="s2">, </span><span class="s1">role</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">safe_count</span><span class="s2">(</span><span class="s1">query</span><span class="s2">):</span>
+    <span class="s3"># Führt eine Zählabfrage sicher aus</span>
+    <span class="s3"># Falls eine Tabelle noch nicht existiert, wird 0 zurückgegeben</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s1">query</span><span class="s2">).</span><span class="s1">fetchone</span><span class="s2">()[</span><span class="s5">0</span><span class="s2">]</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s1">result</span>
+    <span class="s0">except </span><span class="s1">sqlite3</span><span class="s2">.</span><span class="s1">OperationalError</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s5">0</span>
+
+
+<span class="s0">def </span><span class="s1">has_permission</span><span class="s2">(</span><span class="s1">role</span><span class="s2">, </span><span class="s1">data_type</span><span class="s2">):</span>
+    <span class="s3"># Hier wird festgelegt, welche Rolle welche Patientendaten sehen darf</span>
+    <span class="s1">permissions </span><span class="s2">= {</span>
+        <span class="s4">&quot;doctor&quot;</span><span class="s2">: [</span><span class="s4">&quot;basic&quot;</span><span class="s2">, </span><span class="s4">&quot;diagnosis&quot;</span><span class="s2">, </span><span class="s4">&quot;medication&quot;</span><span class="s2">, </span><span class="s4">&quot;lab_results&quot;</span><span class="s2">, </span><span class="s4">&quot;vital_values&quot;</span><span class="s2">],</span>
+        <span class="s4">&quot;nurse&quot;</span><span class="s2">: [</span><span class="s4">&quot;basic&quot;</span><span class="s2">, </span><span class="s4">&quot;medication&quot;</span><span class="s2">, </span><span class="s4">&quot;vital_values&quot;</span><span class="s2">],</span>
+        <span class="s4">&quot;lab&quot;</span><span class="s2">: [</span><span class="s4">&quot;basic&quot;</span><span class="s2">, </span><span class="s4">&quot;lab_results&quot;</span><span class="s2">],</span>
+        <span class="s4">&quot;admin&quot;</span><span class="s2">: [</span><span class="s4">&quot;basic&quot;</span><span class="s2">, </span><span class="s4">&quot;diagnosis&quot;</span><span class="s2">, </span><span class="s4">&quot;medication&quot;</span><span class="s2">, </span><span class="s4">&quot;lab_results&quot;</span><span class="s2">, </span><span class="s4">&quot;vital_values&quot;</span><span class="s2">, </span><span class="s4">&quot;logs&quot;</span><span class="s2">]</span>
+    <span class="s2">}</span>
+
+    <span class="s0">return </span><span class="s1">data_type </span><span class="s0">in </span><span class="s1">permissions</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">role</span><span class="s2">, [])  </span><span class="s3"># gibt True zurück, wenn die Rolle Zugriff hat</span>
+
+
+<span class="s0">def </span><span class="s1">log_access</span><span class="s2">(</span><span class="s1">username</span><span class="s2">, </span><span class="s1">role</span><span class="s2">, </span><span class="s1">patient_name</span><span class="s2">, </span><span class="s1">accessed_data</span><span class="s2">, </span><span class="s1">access_reason</span><span class="s2">):</span>
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s3"># speichert den Zugriff inklusive Zugriffsgrund</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        INSERT INTO access_logs (username, role, patient_name, accessed_data, access_reason) 
+        VALUES (?, ?, ?, ?, ?) 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">username</span><span class="s2">, </span><span class="s1">role</span><span class="s2">, </span><span class="s1">patient_name</span><span class="s2">, </span><span class="s1">accessed_data</span><span class="s2">, </span><span class="s1">access_reason</span><span class="s2">))</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()  </span><span class="s3"># speichert die Änderung</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/&quot;</span><span class="s2">)  </span><span class="s3"># Startseite</span>
+<span class="s0">def </span><span class="s1">home</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># leitet direkt zur Login-Seite weiter</span>
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/login&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Login-Seite, nimmt GET und POST an</span>
+<span class="s0">def </span><span class="s1">login</span><span class="s2">():</span>
+    <span class="s1">error </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># speichert eine Fehlermeldung, falls Login falsch ist</span>
+
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s4">&quot;POST&quot;</span><span class="s2">:  </span><span class="s3"># wird ausgeführt, wenn das Login-Formular abgeschickt wurde</span>
+        <span class="s1">username </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">]  </span><span class="s3"># liest den Benutzernamen aus dem Formular</span>
+        <span class="s1">password </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;password&quot;</span><span class="s2">]  </span><span class="s3"># liest das Passwort aus dem Formular</span>
+
+        <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+        <span class="s3"># sucht einen Benutzer mit passendem Benutzernamen und Passwort</span>
+        <span class="s1">user </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+            SELECT * FROM users 
+            WHERE username = ? AND password = ? AND is_active = 1 
+        &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">username</span><span class="s2">, </span><span class="s1">password</span><span class="s2">)).</span><span class="s1">fetchone</span><span class="s2">()</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt die Datenbankverbindung</span>
+
+        <span class="s0">if </span><span class="s1">user</span><span class="s2">:  </span><span class="s3"># wenn ein passender Benutzer gefunden wurde</span>
+            <span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">] = </span><span class="s1">user</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">]  </span><span class="s3"># speichert den Benutzernamen in der Sitzung</span>
+            <span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] = </span><span class="s1">user</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">]  </span><span class="s3"># speichert die Rolle in der Sitzung</span>
+            <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;dashboard&quot;</span><span class="s2">))  </span><span class="s3"># leitet zum Dashboard weiter</span>
+
+        <span class="s1">error </span><span class="s2">= </span><span class="s4">&quot;Falscher Benutzername oder falsches Passwort.&quot;  </span><span class="s3"># Fehlermeldung bei falschem Login</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span><span class="s4">&quot;login.html&quot;</span><span class="s2">, </span><span class="s1">error</span><span class="s2">=</span><span class="s1">error</span><span class="s2">)  </span><span class="s3"># zeigt die Login-Seite an</span>
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/dashboard&quot;</span><span class="s2">)  </span><span class="s3"># Dashboard-Seite</span>
+<span class="s0">def </span><span class="s1">dashboard</span><span class="s2">():</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob Benutzer eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># falls nicht, zurück zum Login</span>
+
+    <span class="s1">notifications </span><span class="s2">= []  </span><span class="s3"># offene Arzt-Benachrichtigungen</span>
+    <span class="s1">role </span><span class="s2">= </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">]  </span><span class="s3"># aktuelle Rolle</span>
+
+    <span class="s3"># Statistiken für das Dashboard</span>
+    <span class="s1">patient_count </span><span class="s2">= </span><span class="s1">safe_count</span><span class="s2">(</span><span class="s4">&quot;SELECT COUNT(*) FROM patients&quot;</span><span class="s2">)</span>
+    <span class="s1">user_count </span><span class="s2">= </span><span class="s1">safe_count</span><span class="s2">(</span><span class="s4">&quot;SELECT COUNT(*) FROM users&quot;</span><span class="s2">)</span>
+    <span class="s1">open_orders_count </span><span class="s2">= </span><span class="s1">safe_count</span><span class="s2">(</span><span class="s4">&quot;SELECT COUNT(*) FROM doctor_orders WHERE status = 'offen'&quot;</span><span class="s2">)</span>
+    <span class="s1">open_medications_count </span><span class="s2">= </span><span class="s1">safe_count</span><span class="s2">(</span><span class="s4">&quot;SELECT COUNT(*) FROM medication_plan WHERE status = 'offen'&quot;</span><span class="s2">)</span>
+    <span class="s1">open_notifications_count </span><span class="s2">= </span><span class="s1">safe_count</span><span class="s2">(</span><span class="s4">&quot;SELECT COUNT(*) FROM doctor_notifications WHERE status = 'offen'&quot;</span><span class="s2">)</span>
+    <span class="s1">access_logs_count </span><span class="s2">= </span><span class="s1">safe_count</span><span class="s2">(</span><span class="s4">&quot;SELECT COUNT(*) FROM access_logs&quot;</span><span class="s2">)</span>
+
+    <span class="s3"># Ärzte und Admins sehen offene Benachrichtigungen</span>
+    <span class="s0">if </span><span class="s1">role </span><span class="s0">in </span><span class="s2">[</span><span class="s4">&quot;doctor&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:</span>
+        <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">notifications </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+                SELECT doctor_notifications.*, patients.name AS patient_name 
+                FROM doctor_notifications 
+                JOIN patients ON doctor_notifications.patient_id = patients.id 
+                WHERE doctor_notifications.status = 'offen' 
+                ORDER BY doctor_notifications.created_at DESC 
+            &quot;&quot;&quot;</span><span class="s2">).</span><span class="s1">fetchall</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s1">sqlite3</span><span class="s2">.</span><span class="s1">OperationalError</span><span class="s2">:</span>
+            <span class="s1">notifications </span><span class="s2">= []</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;dashboard.html&quot;</span><span class="s2">,</span>
+        <span class="s1">username</span><span class="s2">=</span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">],</span>
+        <span class="s1">role</span><span class="s2">=</span><span class="s1">role</span><span class="s2">,</span>
+        <span class="s1">role_label</span><span class="s2">=</span><span class="s1">get_role_label</span><span class="s2">(</span><span class="s1">role</span><span class="s2">),</span>
+        <span class="s1">notifications</span><span class="s2">=</span><span class="s1">notifications</span><span class="s2">,</span>
+        <span class="s1">patient_count</span><span class="s2">=</span><span class="s1">patient_count</span><span class="s2">,</span>
+        <span class="s1">user_count</span><span class="s2">=</span><span class="s1">user_count</span><span class="s2">,</span>
+        <span class="s1">open_orders_count</span><span class="s2">=</span><span class="s1">open_orders_count</span><span class="s2">,</span>
+        <span class="s1">open_medications_count</span><span class="s2">=</span><span class="s1">open_medications_count</span><span class="s2">,</span>
+        <span class="s1">open_notifications_count</span><span class="s2">=</span><span class="s1">open_notifications_count</span><span class="s2">,</span>
+        <span class="s1">access_logs_count</span><span class="s2">=</span><span class="s1">access_logs_count</span>
+    <span class="s2">)</span>
+
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/patients&quot;</span><span class="s2">)  </span><span class="s3"># Patientenliste mit Suchfunktion</span>
+<span class="s0">def </span><span class="s1">patients</span><span class="s2">():</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob Benutzer eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># falls nicht, zurück zum Login</span>
+
+    <span class="s1">search_query </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">args</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;search&quot;</span><span class="s2">, </span><span class="s4">&quot;&quot;</span><span class="s2">)  </span><span class="s3"># liest den Suchbegriff aus der URL</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s0">if </span><span class="s1">search_query</span><span class="s2">:  </span><span class="s3"># wenn ein Suchbegriff eingegeben wurde</span>
+        <span class="s1">patient_list </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+            SELECT * FROM patients 
+            WHERE name LIKE ? 
+            ORDER BY name 
+        &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s4">f&quot;%</span><span class="s0">{</span><span class="s1">search_query</span><span class="s0">}</span><span class="s4">%&quot;</span><span class="s2">,)).</span><span class="s1">fetchall</span><span class="s2">()  </span><span class="s3"># sucht Patienten nach Namen</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">patient_list </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+            SELECT * FROM patients 
+            ORDER BY name 
+        &quot;&quot;&quot;</span><span class="s2">).</span><span class="s1">fetchall</span><span class="s2">()  </span><span class="s3"># lädt alle Patienten, wenn nichts gesucht wurde</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;patients.html&quot;</span><span class="s2">,</span>
+        <span class="s1">patients</span><span class="s2">=</span><span class="s1">patient_list</span><span class="s2">,  </span><span class="s3"># gibt Patientenliste an HTML weiter</span>
+        <span class="s1">search_query</span><span class="s2">=</span><span class="s1">search_query  </span><span class="s3"># gibt Suchbegriff an HTML weiter</span>
+    <span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/patient/&lt;int:patient_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Detailseite mit Zugriffsgrund</span>
+<span class="s0">def </span><span class="s1">patient_detail</span><span class="s2">(</span><span class="s1">patient_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob Benutzer eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># falls nicht, zurück zum Login</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">patient </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM patients WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()  </span><span class="s3"># lädt Patient anhand der ID</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">if </span><span class="s1">patient </span><span class="s0">is None</span><span class="s2">:  </span><span class="s3"># falls Patient nicht existiert</span>
+        <span class="s0">return </span><span class="s4">&quot;Patient wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">visible_data </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># am Anfang werden noch keine Patientendaten angezeigt</span>
+    <span class="s1">access_reason </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># am Anfang gibt es noch keinen Zugriffsgrund</span>
+
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s4">&quot;POST&quot;</span><span class="s2">:  </span><span class="s3"># wenn der Benutzer den Grund abgeschickt hat</span>
+        <span class="s1">access_reason </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;access_reason&quot;</span><span class="s2">]  </span><span class="s3"># liest den Zugriffsgrund aus dem Formular</span>
+
+        <span class="s1">role </span><span class="s2">= </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">]  </span><span class="s3"># liest Rolle</span>
+        <span class="s1">username </span><span class="s2">= </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">]  </span><span class="s3"># liest Benutzername</span>
+
+        <span class="s1">visible_data </span><span class="s2">= {}  </span><span class="s3"># hier kommen nur erlaubte Daten rein</span>
+
+        <span class="s0">if </span><span class="s1">has_permission</span><span class="s2">(</span><span class="s1">role</span><span class="s2">, </span><span class="s4">&quot;basic&quot;</span><span class="s2">):  </span><span class="s3"># prüft Zugriff auf Stammdaten</span>
+            <span class="s1">visible_data</span><span class="s2">[</span><span class="s4">&quot;Name&quot;</span><span class="s2">] = </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;name&quot;</span><span class="s2">]</span>
+            <span class="s1">visible_data</span><span class="s2">[</span><span class="s4">&quot;Geburtsdatum&quot;</span><span class="s2">] = </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;birthdate&quot;</span><span class="s2">]</span>
+            <span class="s1">log_access</span><span class="s2">(</span><span class="s1">username</span><span class="s2">, </span><span class="s1">role</span><span class="s2">, </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;name&quot;</span><span class="s2">], </span><span class="s4">&quot;Stammdaten&quot;</span><span class="s2">, </span><span class="s1">access_reason</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">has_permission</span><span class="s2">(</span><span class="s1">role</span><span class="s2">, </span><span class="s4">&quot;diagnosis&quot;</span><span class="s2">):  </span><span class="s3"># prüft Zugriff auf Diagnose</span>
+            <span class="s1">visible_data</span><span class="s2">[</span><span class="s4">&quot;Diagnose&quot;</span><span class="s2">] = </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;diagnosis&quot;</span><span class="s2">]</span>
+            <span class="s1">log_access</span><span class="s2">(</span><span class="s1">username</span><span class="s2">, </span><span class="s1">role</span><span class="s2">, </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;name&quot;</span><span class="s2">], </span><span class="s4">&quot;Diagnose&quot;</span><span class="s2">, </span><span class="s1">access_reason</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">has_permission</span><span class="s2">(</span><span class="s1">role</span><span class="s2">, </span><span class="s4">&quot;medication&quot;</span><span class="s2">):  </span><span class="s3"># prüft Zugriff auf Medikation</span>
+            <span class="s1">visible_data</span><span class="s2">[</span><span class="s4">&quot;Medikation&quot;</span><span class="s2">] = </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;medication&quot;</span><span class="s2">]</span>
+            <span class="s1">log_access</span><span class="s2">(</span><span class="s1">username</span><span class="s2">, </span><span class="s1">role</span><span class="s2">, </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;name&quot;</span><span class="s2">], </span><span class="s4">&quot;Medikation&quot;</span><span class="s2">, </span><span class="s1">access_reason</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">has_permission</span><span class="s2">(</span><span class="s1">role</span><span class="s2">, </span><span class="s4">&quot;lab_results&quot;</span><span class="s2">):  </span><span class="s3"># prüft Zugriff auf Laborwerte</span>
+            <span class="s1">visible_data</span><span class="s2">[</span><span class="s4">&quot;Laborwerte&quot;</span><span class="s2">] = </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;lab_results&quot;</span><span class="s2">]</span>
+            <span class="s1">log_access</span><span class="s2">(</span><span class="s1">username</span><span class="s2">, </span><span class="s1">role</span><span class="s2">, </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;name&quot;</span><span class="s2">], </span><span class="s4">&quot;Laborwerte&quot;</span><span class="s2">, </span><span class="s1">access_reason</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">has_permission</span><span class="s2">(</span><span class="s1">role</span><span class="s2">, </span><span class="s4">&quot;vital_values&quot;</span><span class="s2">):  </span><span class="s3"># prüft Zugriff auf Vitalwerte</span>
+            <span class="s1">visible_data</span><span class="s2">[</span><span class="s4">&quot;Vitalwerte&quot;</span><span class="s2">] = </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;vital_values&quot;</span><span class="s2">]</span>
+            <span class="s1">log_access</span><span class="s2">(</span><span class="s1">username</span><span class="s2">, </span><span class="s1">role</span><span class="s2">, </span><span class="s1">patient</span><span class="s2">[</span><span class="s4">&quot;name&quot;</span><span class="s2">], </span><span class="s4">&quot;Vitalwerte&quot;</span><span class="s2">, </span><span class="s1">access_reason</span><span class="s2">)</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">nursing_notes </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM nursing_notes 
+        WHERE patient_id = ? 
+        ORDER BY created_at DESC 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchall</span><span class="s2">()  </span><span class="s3"># lädt Pflegeeinträge des Patienten</span>
+
+    <span class="s1">doctor_orders </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM doctor_orders 
+        WHERE patient_id = ? 
+        ORDER BY created_at DESC 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchall</span><span class="s2">()  </span><span class="s3"># lädt ärztliche Anordnungen des Patienten</span>
+
+    <span class="s1">lab_reports </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM lab_reports 
+        WHERE patient_id = ? 
+        ORDER BY created_at DESC 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchall</span><span class="s2">()  </span><span class="s3"># lädt Laborbefunde des Patienten</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;patient_detail.html&quot;</span><span class="s2">,</span>
+        <span class="s1">patient</span><span class="s2">=</span><span class="s1">patient</span><span class="s2">,</span>
+        <span class="s1">visible_data</span><span class="s2">=</span><span class="s1">visible_data</span><span class="s2">,</span>
+        <span class="s1">access_reason</span><span class="s2">=</span><span class="s1">access_reason</span><span class="s2">,</span>
+        <span class="s1">nursing_notes</span><span class="s2">=</span><span class="s1">nursing_notes</span><span class="s2">,</span>
+        <span class="s1">doctor_orders</span><span class="s2">=</span><span class="s1">doctor_orders</span><span class="s2">,</span>
+        <span class="s1">lab_reports</span><span class="s2">=</span><span class="s1">lab_reports</span><span class="s2">,</span>
+        <span class="s1">role</span><span class="s2">=</span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">]</span>
+    <span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/logs&quot;</span><span class="s2">)  </span><span class="s3"># Seite für Zugriffsprotokolle mit Filterfunktion</span>
+<span class="s0">def </span><span class="s1">logs</span><span class="s2">():</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob Benutzer eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># falls nicht, zurück zum Login</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] != </span><span class="s4">&quot;admin&quot;</span><span class="s2">:  </span><span class="s3"># nur Admins dürfen die Logs sehen</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Admins dürfen die Protokolle sehen.&quot;</span>
+
+    <span class="s1">search_query </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">args</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;search&quot;</span><span class="s2">, </span><span class="s4">&quot;&quot;</span><span class="s2">)  </span><span class="s3"># liest Suchbegriff aus der URL</span>
+    <span class="s1">role_filter </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">args</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;role&quot;</span><span class="s2">, </span><span class="s4">&quot;&quot;</span><span class="s2">)  </span><span class="s3"># liest Rollenfilter aus der URL</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">query </span><span class="s2">= </span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM access_logs 
+        WHERE 1 = 1 
+    &quot;&quot;&quot;  </span><span class="s3"># Grundabfrage, die später erweitert wird</span>
+
+    <span class="s1">parameters </span><span class="s2">= []  </span><span class="s3"># hier speichern wir die Werte für die Platzhalter</span>
+
+    <span class="s0">if </span><span class="s1">search_query</span><span class="s2">:  </span><span class="s3"># wenn ein Suchbegriff eingegeben wurde</span>
+        <span class="s1">query </span><span class="s2">+= </span><span class="s4">&quot;&quot;&quot; 
+            AND ( 
+                username LIKE ? 
+                OR patient_name LIKE ? 
+                OR accessed_data LIKE ? 
+                OR access_reason LIKE ? 
+            ) 
+        &quot;&quot;&quot;</span>
+        <span class="s1">parameters</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">([</span>
+            <span class="s4">f&quot;%</span><span class="s0">{</span><span class="s1">search_query</span><span class="s0">}</span><span class="s4">%&quot;</span><span class="s2">,</span>
+            <span class="s4">f&quot;%</span><span class="s0">{</span><span class="s1">search_query</span><span class="s0">}</span><span class="s4">%&quot;</span><span class="s2">,</span>
+            <span class="s4">f&quot;%</span><span class="s0">{</span><span class="s1">search_query</span><span class="s0">}</span><span class="s4">%&quot;</span><span class="s2">,</span>
+            <span class="s4">f&quot;%</span><span class="s0">{</span><span class="s1">search_query</span><span class="s0">}</span><span class="s4">%&quot;</span>
+        <span class="s2">])  </span><span class="s3"># fügt Suchwerte sicher zur Abfrage hinzu</span>
+
+    <span class="s0">if </span><span class="s1">role_filter</span><span class="s2">:  </span><span class="s3"># wenn eine Rolle ausgewählt wurde</span>
+        <span class="s1">query </span><span class="s2">+= </span><span class="s4">&quot; AND role = ?&quot;</span>
+        <span class="s1">parameters</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">role_filter</span><span class="s2">)  </span><span class="s3"># fügt Rollenfilter hinzu</span>
+
+    <span class="s1">query </span><span class="s2">+= </span><span class="s4">&quot; ORDER BY access_time DESC&quot;  </span><span class="s3"># neueste Einträge zuerst</span>
+
+    <span class="s1">log_list </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s1">query</span><span class="s2">, </span><span class="s1">parameters</span><span class="s2">).</span><span class="s1">fetchall</span><span class="s2">()  </span><span class="s3"># führt die gefilterte Suche aus</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;logs.html&quot;</span><span class="s2">,</span>
+        <span class="s1">logs</span><span class="s2">=</span><span class="s1">log_list</span><span class="s2">,  </span><span class="s3"># gibt Log-Einträge an HTML weiter</span>
+        <span class="s1">search_query</span><span class="s2">=</span><span class="s1">search_query</span><span class="s2">,  </span><span class="s3"># gibt Suchbegriff an HTML weiter</span>
+        <span class="s1">role_filter</span><span class="s2">=</span><span class="s1">role_filter  </span><span class="s3"># gibt ausgewählte Rolle an HTML weiter</span>
+    <span class="s2">)</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/add_user&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Seite zum Anlegen neuer Benutzer</span>
+<span class="s0">def </span><span class="s1">add_user</span><span class="s2">():</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob jemand eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># falls nicht, zurück zum Login</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] != </span><span class="s4">&quot;admin&quot;</span><span class="s2">:  </span><span class="s3"># nur Admins dürfen neue Benutzer anlegen</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Admins dürfen neue Benutzer anlegen.&quot;</span>
+
+    <span class="s1">message </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># speichert eine Erfolgsmeldung oder Fehlermeldung</span>
+
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s4">&quot;POST&quot;</span><span class="s2">:  </span><span class="s3"># wird ausgeführt, wenn das Formular abgeschickt wurde</span>
+        <span class="s1">username </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">]  </span><span class="s3"># liest den neuen Benutzernamen aus</span>
+        <span class="s1">password </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;password&quot;</span><span class="s2">]  </span><span class="s3"># liest das neue Passwort aus</span>
+        <span class="s1">role </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">]  </span><span class="s3"># liest die ausgewählte Rolle aus</span>
+
+        <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s3"># fügt den neuen Benutzer in die Tabelle users ein</span>
+            <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+                INSERT INTO users (username, password, role) 
+                VALUES (?, ?, ?) 
+            &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">username</span><span class="s2">, </span><span class="s1">password</span><span class="s2">, </span><span class="s1">role</span><span class="s2">))</span>
+
+            <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()  </span><span class="s3"># speichert die Änderung</span>
+            <span class="s1">message </span><span class="s2">= </span><span class="s4">&quot;Benutzer wurde erfolgreich angelegt.&quot;  </span><span class="s3"># Erfolgsmeldung</span>
+
+        <span class="s0">except </span><span class="s1">sqlite3</span><span class="s2">.</span><span class="s1">IntegrityError</span><span class="s2">:</span>
+            <span class="s3"># passiert, wenn der Benutzername schon existiert</span>
+            <span class="s1">message </span><span class="s2">= </span><span class="s4">&quot;Dieser Benutzername existiert bereits.&quot;</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span><span class="s4">&quot;add_user.html&quot;</span><span class="s2">, </span><span class="s1">message</span><span class="s2">=</span><span class="s1">message</span><span class="s2">)  </span><span class="s3"># zeigt die HTML-Seite an</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/users&quot;</span><span class="s2">)  </span><span class="s3"># Seite für die Benutzerverwaltung</span>
+<span class="s0">def </span><span class="s1">users</span><span class="s2">():</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob ein Benutzer eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># falls nicht, zurück zum Login</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] != </span><span class="s4">&quot;admin&quot;</span><span class="s2">:  </span><span class="s3"># nur Admins dürfen die Benutzerliste sehen</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Admins dürfen die Benutzerverwaltung sehen.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet die Datenbankverbindung</span>
+
+    <span class="s1">user_list </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT id, username, role, is_active FROM users 
+        ORDER BY id 
+    &quot;&quot;&quot;</span><span class="s2">).</span><span class="s1">fetchall</span><span class="s2">()  </span><span class="s3"># lädt alle Benutzer aus der Datenbank</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt die Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span><span class="s4">&quot;users.html&quot;</span><span class="s2">, </span><span class="s1">users</span><span class="s2">=</span><span class="s1">user_list</span><span class="s2">)  </span><span class="s3"># zeigt die Benutzerliste an</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/change_role/&lt;int:user_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Route zum Ändern einer Benutzerrolle</span>
+<span class="s0">def </span><span class="s1">change_role</span><span class="s2">(</span><span class="s1">user_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob jemand eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># falls nicht, zurück zum Login</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] != </span><span class="s4">&quot;admin&quot;</span><span class="s2">:  </span><span class="s3"># nur Admins dürfen Rollen ändern</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Admins dürfen Rollen ändern.&quot;</span>
+
+    <span class="s1">new_role </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">]  </span><span class="s3"># liest die neue Rolle aus dem Formular</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        UPDATE users 
+        SET role = ? 
+        WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">new_role</span><span class="s2">, </span><span class="s1">user_id</span><span class="s2">))  </span><span class="s3"># aktualisiert die Rolle des ausgewählten Benutzers</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()  </span><span class="s3"># speichert die Änderung</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt die Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;users&quot;</span><span class="s2">))  </span><span class="s3"># geht zurück zur Benutzerverwaltung</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/toggle_user/&lt;int:user_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># aktiviert oder deaktiviert einen Benutzer</span>
+<span class="s0">def </span><span class="s1">toggle_user</span><span class="s2">(</span><span class="s1">user_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob jemand eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># falls nicht, zurück zum Login</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] != </span><span class="s4">&quot;admin&quot;</span><span class="s2">:  </span><span class="s3"># nur Admins dürfen Benutzer aktivieren/deaktivieren</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Admins dürfen Benutzer aktivieren oder deaktivieren.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">user </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM users WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">user_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()  </span><span class="s3"># lädt den ausgewählten Benutzer</span>
+
+    <span class="s0">if </span><span class="s1">user </span><span class="s0">is None</span><span class="s2">:  </span><span class="s3"># falls die ID nicht existiert</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Benutzer wurde nicht gefunden.&quot;</span>
+
+    <span class="s0">if </span><span class="s1">user</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">] == </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">]:  </span><span class="s3"># Admin soll sich nicht selbst deaktivieren</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Du kannst deinen eigenen Benutzer nicht deaktivieren.&quot;</span>
+
+    <span class="s1">new_status </span><span class="s2">= </span><span class="s5">0 </span><span class="s0">if </span><span class="s1">user</span><span class="s2">[</span><span class="s4">&quot;is_active&quot;</span><span class="s2">] == </span><span class="s5">1 </span><span class="s0">else </span><span class="s5">1  </span><span class="s3"># wechselt zwischen aktiv und deaktiviert</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        UPDATE users 
+        SET is_active = ? 
+        WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">new_status</span><span class="s2">, </span><span class="s1">user_id</span><span class="s2">))  </span><span class="s3"># speichert den neuen Status</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()  </span><span class="s3"># speichert Änderung</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;users&quot;</span><span class="s2">))  </span><span class="s3"># zurück zur Benutzerverwaltung</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/add_patient&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Seite zum Anlegen neuer Patienten</span>
+<span class="s0">def </span><span class="s1">add_patient</span><span class="s2">():</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob jemand eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># falls nicht, zurück zum Login</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] != </span><span class="s4">&quot;admin&quot;</span><span class="s2">:  </span><span class="s3"># nur Admins dürfen neue Patienten anlegen</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Admins dürfen neue Patienten anlegen.&quot;</span>
+
+    <span class="s1">message </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># speichert eine Erfolgsmeldung</span>
+
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s4">&quot;POST&quot;</span><span class="s2">:  </span><span class="s3"># wenn das Formular abgeschickt wurde</span>
+        <span class="s1">name </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;name&quot;</span><span class="s2">]  </span><span class="s3"># liest den Namen aus dem Formular</span>
+        <span class="s1">birthdate </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;birthdate&quot;</span><span class="s2">]  </span><span class="s3"># liest das Geburtsdatum aus dem Formular</span>
+        <span class="s1">diagnosis </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;diagnosis&quot;</span><span class="s2">]  </span><span class="s3"># liest die Diagnose aus dem Formular</span>
+        <span class="s1">medication </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;medication&quot;</span><span class="s2">]  </span><span class="s3"># liest die Medikation aus dem Formular</span>
+        <span class="s1">lab_results </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;lab_results&quot;</span><span class="s2">]  </span><span class="s3"># liest Laborwerte aus dem Formular</span>
+        <span class="s1">vital_values </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;vital_values&quot;</span><span class="s2">]  </span><span class="s3"># liest Vitalwerte aus dem Formular</span>
+
+        <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+            INSERT INTO patients (name, birthdate, diagnosis, medication, lab_results, vital_values) 
+            VALUES (?, ?, ?, ?, ?, ?) 
+        &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">name</span><span class="s2">, </span><span class="s1">birthdate</span><span class="s2">, </span><span class="s1">diagnosis</span><span class="s2">, </span><span class="s1">medication</span><span class="s2">, </span><span class="s1">lab_results</span><span class="s2">, </span><span class="s1">vital_values</span><span class="s2">))  </span><span class="s3"># speichert neuen Patienten</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()  </span><span class="s3"># speichert Änderung dauerhaft</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+        <span class="s1">message </span><span class="s2">= </span><span class="s4">&quot;Patient wurde erfolgreich angelegt.&quot;  </span><span class="s3"># Erfolgsmeldung</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span><span class="s4">&quot;add_patient.html&quot;</span><span class="s2">, </span><span class="s1">message</span><span class="s2">=</span><span class="s1">message</span><span class="s2">)  </span><span class="s3"># zeigt Formularseite an</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/add_nursing_note/&lt;int:patient_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Pflegeeintrag hinzufügen</span>
+<span class="s0">def </span><span class="s1">add_nursing_note</span><span class="s2">(</span><span class="s1">patient_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob ein Benutzer eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># wenn nicht, zurück zum Login</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;nurse&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:  </span><span class="s3"># nur Pflege und Admin dürfen Pflegeeinträge erstellen</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Pflegekräfte dürfen Pflegeeinträge erstellen.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">patient </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM patients WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()  </span><span class="s3"># lädt den Patienten anhand der ID</span>
+
+    <span class="s0">if </span><span class="s1">patient </span><span class="s0">is None</span><span class="s2">:  </span><span class="s3"># falls der Patient nicht existiert</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Patient wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">message </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># speichert eine Erfolgsmeldung</span>
+
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s4">&quot;POST&quot;</span><span class="s2">:  </span><span class="s3"># wenn das Formular abgeschickt wurde</span>
+        <span class="s1">note_type </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;note_type&quot;</span><span class="s2">]  </span><span class="s3"># liest die Art des Pflegeeintrags</span>
+        <span class="s1">note_text </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;note_text&quot;</span><span class="s2">]  </span><span class="s3"># liest den Text des Pflegeeintrags</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+            INSERT INTO nursing_notes (patient_id, nurse_username, note_type, note_text) 
+            VALUES (?, ?, ?, ?) 
+        &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">, </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">], </span><span class="s1">note_type</span><span class="s2">, </span><span class="s1">note_text</span><span class="s2">))  </span><span class="s3"># speichert den Pflegeeintrag</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()  </span><span class="s3"># speichert dauerhaft</span>
+        <span class="s1">message </span><span class="s2">= </span><span class="s4">&quot;Pflegeeintrag wurde gespeichert.&quot;  </span><span class="s3"># Erfolgsmeldung</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;add_nursing_note.html&quot;</span><span class="s2">,</span>
+        <span class="s1">patient</span><span class="s2">=</span><span class="s1">patient</span><span class="s2">,</span>
+        <span class="s1">message</span><span class="s2">=</span><span class="s1">message</span>
+    <span class="s2">)</span>
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/add_doctor_order/&lt;int:patient_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># ärztliche Anordnung hinzufügen</span>
+<span class="s0">def </span><span class="s1">add_doctor_order</span><span class="s2">(</span><span class="s1">patient_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob ein Benutzer eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># wenn nicht, zurück zum Login</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;doctor&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:  </span><span class="s3"># nur Arzt und Admin dürfen Anordnungen erstellen</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Ärzte dürfen ärztliche Anordnungen erstellen.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">patient </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM patients WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()  </span><span class="s3"># lädt den Patienten anhand der ID</span>
+
+    <span class="s0">if </span><span class="s1">patient </span><span class="s0">is None</span><span class="s2">:  </span><span class="s3"># falls der Patient nicht existiert</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Patient wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">message </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># speichert eine Erfolgsmeldung</span>
+
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s4">&quot;POST&quot;</span><span class="s2">:  </span><span class="s3"># wenn das Formular abgeschickt wurde</span>
+        <span class="s1">order_text </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;order_text&quot;</span><span class="s2">]  </span><span class="s3"># liest die ärztliche Anordnung aus dem Formular</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+            INSERT INTO doctor_orders (patient_id, doctor_username, order_text) 
+            VALUES (?, ?, ?) 
+        &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">, </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">], </span><span class="s1">order_text</span><span class="s2">))  </span><span class="s3"># speichert die ärztliche Anordnung</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()  </span><span class="s3"># speichert dauerhaft</span>
+        <span class="s1">message </span><span class="s2">= </span><span class="s4">&quot;Ärztliche Anordnung wurde gespeichert.&quot;  </span><span class="s3"># Erfolgsmeldung</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;add_doctor_order.html&quot;</span><span class="s2">,</span>
+        <span class="s1">patient</span><span class="s2">=</span><span class="s1">patient</span><span class="s2">,</span>
+        <span class="s1">message</span><span class="s2">=</span><span class="s1">message</span>
+    <span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/patient_curve/&lt;int:patient_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Patientenkurve eines Patienten</span>
+<span class="s0">def </span><span class="s1">patient_curve</span><span class="s2">(</span><span class="s1">patient_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;nurse&quot;</span><span class="s2">, </span><span class="s4">&quot;doctor&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Sie dürfen die Patientenkurve nicht öffnen.&quot;</span>
+
+    <span class="s1">selected_date </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">args</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;date&quot;</span><span class="s2">, </span><span class="s4">&quot;2026-04-27&quot;</span><span class="s2">)  </span><span class="s3"># Standarddatum für Testdaten</span>
+    <span class="s1">message </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()</span>
+
+    <span class="s1">patient </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM patients WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()</span>
+
+    <span class="s0">if </span><span class="s1">patient </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Patient wurde nicht gefunden.&quot;</span>
+
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s4">&quot;POST&quot;</span><span class="s2">:</span>
+        <span class="s1">record_date </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;record_date&quot;</span><span class="s2">]</span>
+        <span class="s1">record_time </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;record_time&quot;</span><span class="s2">]</span>
+        <span class="s1">blood_pressure </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;blood_pressure&quot;</span><span class="s2">]</span>
+        <span class="s1">pulse </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;pulse&quot;</span><span class="s2">]</span>
+        <span class="s1">temperature </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;temperature&quot;</span><span class="s2">]</span>
+        <span class="s1">oxygen_saturation </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;oxygen_saturation&quot;</span><span class="s2">]</span>
+        <span class="s1">note </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;note&quot;</span><span class="s2">]</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+            INSERT INTO vital_signs ( 
+                patient_id, 
+                recorded_by, 
+                record_date, 
+                record_time, 
+                blood_pressure, 
+                pulse, 
+                temperature, 
+                oxygen_saturation, 
+                note 
+            ) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) 
+        &quot;&quot;&quot;</span><span class="s2">, (</span>
+            <span class="s1">patient_id</span><span class="s2">,</span>
+            <span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">],</span>
+            <span class="s1">record_date</span><span class="s2">,</span>
+            <span class="s1">record_time</span><span class="s2">,</span>
+            <span class="s1">blood_pressure</span><span class="s2">,</span>
+            <span class="s1">pulse</span><span class="s2">,</span>
+            <span class="s1">temperature</span><span class="s2">,</span>
+            <span class="s1">oxygen_saturation</span><span class="s2">,</span>
+            <span class="s1">note</span>
+        <span class="s2">))</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()</span>
+        <span class="s1">selected_date </span><span class="s2">= </span><span class="s1">record_date</span>
+        <span class="s1">message </span><span class="s2">= </span><span class="s4">&quot;Vitalwerte wurden gespeichert.&quot;</span>
+
+    <span class="s1">vital_list </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM vital_signs 
+        WHERE patient_id = ? AND record_date = ? 
+        ORDER BY record_time 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">, </span><span class="s1">selected_date</span><span class="s2">)).</span><span class="s1">fetchall</span><span class="s2">()</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s1">curve_rows </span><span class="s2">= []</span>
+
+    <span class="s1">pulse_values </span><span class="s2">= []</span>
+    <span class="s1">temperature_values </span><span class="s2">= []</span>
+    <span class="s1">spo2_values </span><span class="s2">= []</span>
+
+    <span class="s0">for </span><span class="s1">vital </span><span class="s0">in </span><span class="s1">vital_list</span><span class="s2">:</span>
+        <span class="s1">status </span><span class="s2">= </span><span class="s4">&quot;normal&quot;</span>
+        <span class="s1">alerts </span><span class="s2">= []</span>
+
+        <span class="s1">pulse </span><span class="s2">= </span><span class="s1">vital</span><span class="s2">[</span><span class="s4">&quot;pulse&quot;</span><span class="s2">]</span>
+        <span class="s1">temperature </span><span class="s2">= </span><span class="s1">vital</span><span class="s2">[</span><span class="s4">&quot;temperature&quot;</span><span class="s2">]</span>
+        <span class="s1">oxygen_saturation </span><span class="s2">= </span><span class="s1">vital</span><span class="s2">[</span><span class="s4">&quot;oxygen_saturation&quot;</span><span class="s2">]</span>
+
+        <span class="s0">if </span><span class="s1">pulse </span><span class="s0">is not None and </span><span class="s1">pulse </span><span class="s2">!= </span><span class="s4">&quot;&quot;</span><span class="s2">:</span>
+            <span class="s1">pulse </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">pulse</span><span class="s2">)</span>
+            <span class="s1">pulse_values</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">pulse</span><span class="s2">)</span>
+
+            <span class="s0">if </span><span class="s1">pulse </span><span class="s2">&gt; </span><span class="s5">100</span><span class="s2">:</span>
+                <span class="s1">status </span><span class="s2">= </span><span class="s4">&quot;auffällig&quot;</span>
+                <span class="s1">alerts</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">&quot;Puls erhöht&quot;</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">temperature </span><span class="s0">is not None and </span><span class="s1">temperature </span><span class="s2">!= </span><span class="s4">&quot;&quot;</span><span class="s2">:</span>
+            <span class="s1">temperature </span><span class="s2">= </span><span class="s1">float</span><span class="s2">(</span><span class="s1">temperature</span><span class="s2">)</span>
+            <span class="s1">temperature_values</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">temperature</span><span class="s2">)</span>
+
+            <span class="s0">if </span><span class="s1">temperature </span><span class="s2">&gt;= </span><span class="s5">38.0</span><span class="s2">:</span>
+                <span class="s1">status </span><span class="s2">= </span><span class="s4">&quot;auffällig&quot;</span>
+                <span class="s1">alerts</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">&quot;Temperatur erhöht&quot;</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">oxygen_saturation </span><span class="s0">is not None and </span><span class="s1">oxygen_saturation </span><span class="s2">!= </span><span class="s4">&quot;&quot;</span><span class="s2">:</span>
+            <span class="s1">oxygen_saturation </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">oxygen_saturation</span><span class="s2">)</span>
+            <span class="s1">spo2_values</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">oxygen_saturation</span><span class="s2">)</span>
+
+            <span class="s0">if </span><span class="s1">oxygen_saturation </span><span class="s2">&lt; </span><span class="s5">94</span><span class="s2">:</span>
+                <span class="s1">status </span><span class="s2">= </span><span class="s4">&quot;auffällig&quot;</span>
+                <span class="s1">alerts</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">&quot;SpO₂ niedrig&quot;</span><span class="s2">)</span>
+
+        <span class="s1">curve_rows</span><span class="s2">.</span><span class="s1">append</span><span class="s2">({</span>
+            <span class="s4">&quot;data&quot;</span><span class="s2">: </span><span class="s1">vital</span><span class="s2">,</span>
+            <span class="s4">&quot;status&quot;</span><span class="s2">: </span><span class="s1">status</span><span class="s2">,</span>
+            <span class="s4">&quot;alerts&quot;</span><span class="s2">: </span><span class="s4">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">alerts</span><span class="s2">) </span><span class="s0">if </span><span class="s1">alerts </span><span class="s0">else </span><span class="s4">&quot;Keine Auffälligkeit&quot;</span>
+        <span class="s2">})</span>
+
+    <span class="s1">abnormal_count </span><span class="s2">= </span><span class="s5">0</span>
+
+    <span class="s0">for </span><span class="s1">row </span><span class="s0">in </span><span class="s1">curve_rows</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">row</span><span class="s2">[</span><span class="s4">&quot;status&quot;</span><span class="s2">] == </span><span class="s4">&quot;auffällig&quot;</span><span class="s2">:</span>
+            <span class="s1">abnormal_count </span><span class="s2">+= </span><span class="s5">1</span>
+
+    <span class="s1">summary </span><span class="s2">= {</span>
+        <span class="s4">&quot;entries&quot;</span><span class="s2">: </span><span class="s1">len</span><span class="s2">(</span><span class="s1">curve_rows</span><span class="s2">),</span>
+        <span class="s4">&quot;abnormal_count&quot;</span><span class="s2">: </span><span class="s1">abnormal_count</span><span class="s2">,</span>
+        <span class="s4">&quot;max_pulse&quot;</span><span class="s2">: </span><span class="s1">max</span><span class="s2">(</span><span class="s1">pulse_values</span><span class="s2">) </span><span class="s0">if </span><span class="s1">pulse_values </span><span class="s0">else </span><span class="s4">&quot;-&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;max_temperature&quot;</span><span class="s2">: </span><span class="s1">max</span><span class="s2">(</span><span class="s1">temperature_values</span><span class="s2">) </span><span class="s0">if </span><span class="s1">temperature_values </span><span class="s0">else </span><span class="s4">&quot;-&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;min_spo2&quot;</span><span class="s2">: </span><span class="s1">min</span><span class="s2">(</span><span class="s1">spo2_values</span><span class="s2">) </span><span class="s0">if </span><span class="s1">spo2_values </span><span class="s0">else </span><span class="s4">&quot;-&quot;</span>
+    <span class="s2">}</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;patient_curve.html&quot;</span><span class="s2">,</span>
+        <span class="s1">patient</span><span class="s2">=</span><span class="s1">patient</span><span class="s2">,</span>
+        <span class="s1">curve_rows</span><span class="s2">=</span><span class="s1">curve_rows</span><span class="s2">,</span>
+        <span class="s1">selected_date</span><span class="s2">=</span><span class="s1">selected_date</span><span class="s2">,</span>
+        <span class="s1">role</span><span class="s2">=</span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">],</span>
+        <span class="s1">message</span><span class="s2">=</span><span class="s1">message</span><span class="s2">,</span>
+        <span class="s1">summary</span><span class="s2">=</span><span class="s1">summary</span>
+    <span class="s2">)</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/complete_order/&lt;int:order_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># ärztliche Anordnung als erledigt markieren</span>
+<span class="s0">def </span><span class="s1">complete_order</span><span class="s2">(</span><span class="s1">order_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob jemand eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;nurse&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:  </span><span class="s3"># nur Pflege und Admin dürfen Anordnungen erledigen</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Pflegekräfte dürfen Anordnungen als erledigt markieren.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">order </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM doctor_orders 
+        WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">order_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()  </span><span class="s3"># lädt die ärztliche Anordnung</span>
+
+    <span class="s0">if </span><span class="s1">order </span><span class="s0">is None</span><span class="s2">:  </span><span class="s3"># falls keine Anordnung gefunden wurde</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Anordnung wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        UPDATE doctor_orders 
+        SET status = 'erledigt', 
+            completed_by = ?, 
+            completed_at = CURRENT_TIMESTAMP 
+        WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">], </span><span class="s1">order_id</span><span class="s2">))  </span><span class="s3"># speichert, wer die Anordnung erledigt hat</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()  </span><span class="s3"># speichert Änderung</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;patient_detail&quot;</span><span class="s2">, </span><span class="s1">patient_id</span><span class="s2">=</span><span class="s1">order</span><span class="s2">[</span><span class="s4">&quot;patient_id&quot;</span><span class="s2">]))</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/add_order_from_curve/&lt;int:patient_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Arzt erstellt Anordnung aus Patientenkurve</span>
+<span class="s0">def </span><span class="s1">add_order_from_curve</span><span class="s2">(</span><span class="s1">patient_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob jemand eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;doctor&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:  </span><span class="s3"># nur Arzt und Admin dürfen Anordnungen erstellen</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Ärzte dürfen aus der Patientenkurve Anordnungen erstellen.&quot;</span>
+
+    <span class="s1">order_text </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;order_text&quot;</span><span class="s2">]  </span><span class="s3"># liest die ärztliche Anordnung aus dem Formular</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">patient </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM patients WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()  </span><span class="s3"># prüft, ob der Patient existiert</span>
+
+    <span class="s0">if </span><span class="s1">patient </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Patient wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        INSERT INTO doctor_orders (patient_id, doctor_username, order_text) 
+        VALUES (?, ?, ?) 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">, </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">], </span><span class="s1">order_text</span><span class="s2">))  </span><span class="s3"># speichert die neue ärztliche Anordnung</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()  </span><span class="s3"># speichert dauerhaft</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()  </span><span class="s3"># schließt Datenbankverbindung</span>
+
+    <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;patient_detail&quot;</span><span class="s2">, </span><span class="s1">patient_id</span><span class="s2">=</span><span class="s1">patient_id</span><span class="s2">))</span>
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/notify_doctor/&lt;int:patient_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Pflege informiert Arzt</span>
+<span class="s0">def </span><span class="s1">notify_doctor</span><span class="s2">(</span><span class="s1">patient_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;nurse&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Pflegekräfte dürfen Ärzte informieren.&quot;</span>
+
+    <span class="s1">message </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;message&quot;</span><span class="s2">]</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()</span>
+
+    <span class="s1">patient </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM patients WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()</span>
+
+    <span class="s0">if </span><span class="s1">patient </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Patient wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        INSERT INTO doctor_notifications (patient_id, sent_by, message) 
+        VALUES (?, ?, ?) 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">, </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">], </span><span class="s1">message</span><span class="s2">))</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;patient_curve&quot;</span><span class="s2">, </span><span class="s1">patient_id</span><span class="s2">=</span><span class="s1">patient_id</span><span class="s2">))</span>
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/close_notification/&lt;int:notification_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Benachrichtigung schließen</span>
+<span class="s0">def </span><span class="s1">close_notification</span><span class="s2">(</span><span class="s1">notification_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;doctor&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Ärzte dürfen Benachrichtigungen schließen.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        UPDATE doctor_notifications 
+        SET status = 'geschlossen' 
+        WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">notification_id</span><span class="s2">,))</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;dashboard&quot;</span><span class="s2">))</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/medication_plan/&lt;int:patient_id&gt;&quot;</span><span class="s2">)  </span><span class="s3"># Medikationsplan eines Patienten anzeigen</span>
+<span class="s0">def </span><span class="s1">medication_plan</span><span class="s2">(</span><span class="s1">patient_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;doctor&quot;</span><span class="s2">, </span><span class="s4">&quot;nurse&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Sie dürfen den Medikationsplan nicht öffnen.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()</span>
+
+    <span class="s1">patient </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM patients WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()</span>
+
+    <span class="s0">if </span><span class="s1">patient </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Patient wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">medications </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM medication_plan 
+        WHERE patient_id = ? 
+        ORDER BY schedule_time 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchall</span><span class="s2">()</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;medication_plan.html&quot;</span><span class="s2">,</span>
+        <span class="s1">patient</span><span class="s2">=</span><span class="s1">patient</span><span class="s2">,</span>
+        <span class="s1">medications</span><span class="s2">=</span><span class="s1">medications</span><span class="s2">,</span>
+        <span class="s1">role</span><span class="s2">=</span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">]</span>
+    <span class="s2">)</span>
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/add_medication/&lt;int:patient_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Arzt legt neue Medikation an</span>
+<span class="s0">def </span><span class="s1">add_medication</span><span class="s2">(</span><span class="s1">patient_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;doctor&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Ärzte dürfen Medikation anlegen.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()</span>
+
+    <span class="s1">patient </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM patients WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()</span>
+
+    <span class="s0">if </span><span class="s1">patient </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Patient wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">message </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s4">&quot;POST&quot;</span><span class="s2">:</span>
+        <span class="s1">medication_name </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;medication_name&quot;</span><span class="s2">]</span>
+        <span class="s1">dosage </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;dosage&quot;</span><span class="s2">]</span>
+        <span class="s1">schedule_time </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;schedule_time&quot;</span><span class="s2">]</span>
+        <span class="s1">instructions </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;instructions&quot;</span><span class="s2">]</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+            INSERT INTO medication_plan ( 
+                patient_id, 
+                medication_name, 
+                dosage, 
+                schedule_time, 
+                instructions, 
+                prescribed_by 
+            ) 
+            VALUES (?, ?, ?, ?, ?, ?) 
+        &quot;&quot;&quot;</span><span class="s2">, (</span>
+            <span class="s1">patient_id</span><span class="s2">,</span>
+            <span class="s1">medication_name</span><span class="s2">,</span>
+            <span class="s1">dosage</span><span class="s2">,</span>
+            <span class="s1">schedule_time</span><span class="s2">,</span>
+            <span class="s1">instructions</span><span class="s2">,</span>
+            <span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">]</span>
+        <span class="s2">))</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()</span>
+        <span class="s1">message </span><span class="s2">= </span><span class="s4">&quot;Medikation wurde gespeichert.&quot;</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;add_medication.html&quot;</span><span class="s2">,</span>
+        <span class="s1">patient</span><span class="s2">=</span><span class="s1">patient</span><span class="s2">,</span>
+        <span class="s1">message</span><span class="s2">=</span><span class="s1">message</span>
+    <span class="s2">)</span>
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/administer_medication/&lt;int:medication_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Pflege dokumentiert Medikamentengabe</span>
+<span class="s0">def </span><span class="s1">administer_medication</span><span class="s2">(</span><span class="s1">medication_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;nurse&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Pflegekräfte dürfen Medikamentengaben dokumentieren.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()</span>
+
+    <span class="s1">medication </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM medication_plan WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">medication_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()</span>
+
+    <span class="s0">if </span><span class="s1">medication </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Medikation wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        UPDATE medication_plan 
+        SET status = 'gegeben', 
+            administered_by = ?, 
+            administered_at = CURRENT_TIMESTAMP 
+        WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">], </span><span class="s1">medication_id</span><span class="s2">))</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()</span>
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;medication_plan&quot;</span><span class="s2">, </span><span class="s1">patient_id</span><span class="s2">=</span><span class="s1">medication</span><span class="s2">[</span><span class="s4">&quot;patient_id&quot;</span><span class="s2">]))</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/nursing_tasks&quot;</span><span class="s2">)  </span><span class="s3"># Aufgabenübersicht für Pflegekräfte</span>
+<span class="s0">def </span><span class="s1">nursing_tasks</span><span class="s2">():</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;nurse&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Nur Pflegekräfte dürfen die Aufgabenübersicht sehen.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()</span>
+
+    <span class="s1">open_orders </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT doctor_orders.*, patients.name AS patient_name 
+        FROM doctor_orders 
+        JOIN patients ON doctor_orders.patient_id = patients.id 
+        WHERE doctor_orders.status = 'offen' 
+        ORDER BY doctor_orders.created_at DESC 
+    &quot;&quot;&quot;</span><span class="s2">).</span><span class="s1">fetchall</span><span class="s2">()</span>
+
+    <span class="s1">open_medications </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT medication_plan.*, patients.name AS patient_name 
+        FROM medication_plan 
+        JOIN patients ON medication_plan.patient_id = patients.id 
+        WHERE medication_plan.status = 'offen' 
+        ORDER BY medication_plan.schedule_time 
+    &quot;&quot;&quot;</span><span class="s2">).</span><span class="s1">fetchall</span><span class="s2">()</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;nursing_tasks.html&quot;</span><span class="s2">,</span>
+        <span class="s1">open_orders</span><span class="s2">=</span><span class="s1">open_orders</span><span class="s2">,</span>
+        <span class="s1">open_medications</span><span class="s2">=</span><span class="s1">open_medications</span>
+    <span class="s2">)</span>
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/add_lab_report/&lt;int:patient_id&gt;&quot;</span><span class="s2">, </span><span class="s1">methods</span><span class="s2">=[</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s4">&quot;POST&quot;</span><span class="s2">])  </span><span class="s3"># Laborbefund hinzufügen</span>
+<span class="s0">def </span><span class="s1">add_lab_report</span><span class="s2">(</span><span class="s1">patient_id</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s4">&quot;username&quot; </span><span class="s0">not in </span><span class="s1">session</span><span class="s2">:  </span><span class="s3"># prüft, ob jemand eingeloggt ist</span>
+        <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;role&quot;</span><span class="s2">] </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;lab&quot;</span><span class="s2">, </span><span class="s4">&quot;doctor&quot;</span><span class="s2">, </span><span class="s4">&quot;admin&quot;</span><span class="s2">]:  </span><span class="s3"># Labor, Arzt und Admin dürfen Laborbefunde erfassen</span>
+        <span class="s0">return </span><span class="s4">&quot;Zugriff verweigert. Sie dürfen keine Laborbefunde erfassen.&quot;</span>
+
+    <span class="s1">connection </span><span class="s2">= </span><span class="s1">get_db_connection</span><span class="s2">()  </span><span class="s3"># öffnet Datenbankverbindung</span>
+
+    <span class="s1">patient </span><span class="s2">= </span><span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        SELECT * FROM patients WHERE id = ? 
+    &quot;&quot;&quot;</span><span class="s2">, (</span><span class="s1">patient_id</span><span class="s2">,)).</span><span class="s1">fetchone</span><span class="s2">()  </span><span class="s3"># lädt den Patienten</span>
+
+    <span class="s0">if </span><span class="s1">patient </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s4">&quot;Patient wurde nicht gefunden.&quot;</span>
+
+    <span class="s1">message </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s4">&quot;POST&quot;</span><span class="s2">:</span>
+        <span class="s1">test_name </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;test_name&quot;</span><span class="s2">]  </span><span class="s3"># Name des Laborwerts</span>
+        <span class="s1">result_value </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;result_value&quot;</span><span class="s2">]  </span><span class="s3"># Ergebnis</span>
+        <span class="s1">reference_range </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;reference_range&quot;</span><span class="s2">]  </span><span class="s3"># Referenzbereich</span>
+        <span class="s1">interpretation </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">[</span><span class="s4">&quot;interpretation&quot;</span><span class="s2">]  </span><span class="s3"># Bewertung</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+            INSERT INTO lab_reports ( 
+                patient_id, 
+                lab_username, 
+                test_name, 
+                result_value, 
+                reference_range, 
+                interpretation 
+            ) 
+            VALUES (?, ?, ?, ?, ?, ?) 
+        &quot;&quot;&quot;</span><span class="s2">, (</span>
+            <span class="s1">patient_id</span><span class="s2">,</span>
+            <span class="s1">session</span><span class="s2">[</span><span class="s4">&quot;username&quot;</span><span class="s2">],</span>
+            <span class="s1">test_name</span><span class="s2">,</span>
+            <span class="s1">result_value</span><span class="s2">,</span>
+            <span class="s1">reference_range</span><span class="s2">,</span>
+            <span class="s1">interpretation</span>
+        <span class="s2">))</span>
+
+        <span class="s1">connection</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()</span>
+        <span class="s1">message </span><span class="s2">= </span><span class="s4">&quot;Laborbefund wurde gespeichert.&quot;</span>
+
+    <span class="s1">connection</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">return </span><span class="s1">render_template</span><span class="s2">(</span>
+        <span class="s4">&quot;add_lab_report.html&quot;</span><span class="s2">,</span>
+        <span class="s1">patient</span><span class="s2">=</span><span class="s1">patient</span><span class="s2">,</span>
+        <span class="s1">message</span><span class="s2">=</span><span class="s1">message</span>
+    <span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">app</span><span class="s2">.</span><span class="s1">route</span><span class="s2">(</span><span class="s4">&quot;/logout&quot;</span><span class="s2">)  </span><span class="s3"># Logout-Seite</span>
+<span class="s0">def </span><span class="s1">logout</span><span class="s2">():</span>
+    <span class="s1">session</span><span class="s2">.</span><span class="s1">clear</span><span class="s2">()  </span><span class="s3"># löscht die gespeicherten Login-Daten</span>
+    <span class="s0">return </span><span class="s1">redirect</span><span class="s2">(</span><span class="s1">url_for</span><span class="s2">(</span><span class="s4">&quot;login&quot;</span><span class="s2">))  </span><span class="s3"># leitet zurück zum Login</span>
+
+
+<span class="s0">if </span><span class="s1">__name__ </span><span class="s2">== </span><span class="s4">&quot;__main__&quot;</span><span class="s2">:</span>
+    <span class="s1">app</span><span class="s2">.</span><span class="s1">run</span><span class="s2">(</span><span class="s1">debug</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)  </span><span class="s3"># startet die Flask-App</span></pre>
+</body>
+</html>

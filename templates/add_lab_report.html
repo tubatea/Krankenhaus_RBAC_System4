@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Laborbefund hinzufügen</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Laborbefund hinzufügen</h1>
+            <p class="subtitle">Laborwerte erfassen und der Patientenakte hinzufügen</p>
+        </div>
+
+        <a class="button-link" href="/patient/{{ patient['id'] }}">
+            Zurück zur Patientenakte
+        </a>
+    </div>
+
+    <div class="patient-header">
+        <div>
+            <h2>{{ patient["name"] }}</h2>
+            <p><strong>Geburtsdatum:</strong> {{ patient["birthdate"] }}</p>
+            <p><strong>Patienten-ID:</strong> {{ patient["id"] }}</p>
+        </div>
+
+        <div class="patient-badge">
+            Laborbefund
+        </div>
+    </div>
+
+    {% if message %}
+        <div class="success">
+            {{ message }}
+        </div>
+    {% endif %}
+
+    <div class="form-card">
+        <h2>Befund erfassen</h2>
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-grid">
+                <div>
+                    <label>Untersuchung</label>
+                    <input
+                        type="text"
+                        name="test_name"
+                        required
+                        placeholder="z. B. CRP, Leukozyten, HbA1c"
+                    >
+                </div>
+
+                <div>
+                    <label>Ergebnis</label>
+                    <input
+                        type="text"
+                        name="result_value"
+                        required
+                        placeholder="z. B. 85 mg/l"
+                    >
+                </div>
+
+                <div>
+                    <label>Referenzbereich</label>
+                    <input
+                        type="text"
+                        name="reference_range"
+                        placeholder="z. B. < 5 mg/l"
+                    >
+                </div>
+            </div>
+
+            <label>Bewertung / Interpretation</label>
+            <textarea
+                name="interpretation"
+                placeholder="z. B. deutlich erhöht, Hinweis auf Entzündung"
+            ></textarea>
+
+            <div class="alert-box">
+                Der Laborbefund wird dauerhaft in der Patientenakte gespeichert und ist für berechtigte Rollen sichtbar.
+            </div>
+
+            <button type="submit">Laborbefund speichern</button>
+        </form>
+    </div>
+
+    <div class="function-area">
+        <h2>Navigation</h2>
+
+        <a class="button-link" href="/patient/{{ patient['id'] }}">
+            Patientenakte öffnen
+        </a>
+
+        <a class="button-link secondary" href="/patient_curve/{{ patient['id'] }}">
+            Patientenkurve öffnen
+        </a>
+
+        <a class="button-link secondary" href="/medication_plan/{{ patient['id'] }}">
+            Medikationsplan öffnen
+        </a>
+
+        <a class="button-link logout" href="/logout">
+            Abmelden
+        </a>
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Patientenliste</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Patientenliste</h1>
+            <p class="subtitle">Übersicht aller Patienten im Krankenhaus-System</p>
+        </div>
+
+        <a class="button-link" href="/dashboard">Zurück zum Dashboard</a>
+    </div>
+
+    <div class="function-area">
+        <h2>Patient suchen</h2>
+
+        <form method="GET" action="/patients" class="search-form">
+            <input
+                type="text"
+                name="search"
+                value="{{ search_query }}"
+                placeholder="z. B. Max, Anna oder Müller"
+            >
+            <button type="submit">Suchen</button>
+        </form>
+
+        {% if session["role"] == "admin" %}
+            <a class="button-link" href="/add_patient">Neuen Patienten anlegen</a>
+        {% endif %}
+    </div>
+
+    <h2>Gefundene Patienten</h2>
+
+    {% if patients %}
+        <div class="patient-grid">
+            {% for patient in patients %}
+                <div class="patient-list-card">
+                    <div class="patient-avatar">
+                        {{ patient["name"][0] }}
+                    </div>
+
+                    <div class="patient-info">
+                        <h3>{{ patient["name"] }}</h3>
+                        <p><strong>Geburtsdatum:</strong> {{ patient["birthdate"] }}</p>
+                        <p><strong>Patienten-ID:</strong> {{ patient["id"] }}</p>
+                        {% if patient["admission_id"] %}
+                            <p><strong>Station:</strong> {{ patient["station_number"] }}</p>
+                            <p><strong>Zimmer / Bett:</strong> {{ patient["room_number"] }} / {{ patient["bed_label"] }}</p>
+                        {% else %}
+                            <p><span class="badge-yellow">Aktuell entlassen</span></p>
+                        {% endif %}
+                    </div>
+
+                    <div class="patient-actions">
+                        <a class="button-link" href="/patient/{{ patient['id'] }}">
+                            Patientenakte öffnen
+                        </a>
+
+                        {% if is_doctor_role(session["role"]) or session["role"] == "nurse" %}
+                            <a class="button-link secondary" href="/patient_curve/{{ patient['id'] }}">
+                                Patientenkurve
+                            </a>
+
+                            <a class="button-link secondary" href="/medication_plan/{{ patient['id'] }}">
+                                Medikationsplan
+                            </a>
+                        {% endif %}
+
+                        {% if session["role"] == "admin" %}
+                            <a class="button-link secondary" href="{{ url_for('patient_location', patient_id=patient['id']) }}">
+                                Aufnahme / Verlegung
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="note">
+            Kein Patient gefunden.
+        </div>
+    {% endif %}
+
+    <br>
+    <a class="button-link logout" href="/logout">Abmelden</a>
+
+</div>
+
+</body>
+</html>

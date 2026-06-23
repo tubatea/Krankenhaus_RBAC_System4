@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Benutzerverwaltung</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container wide-container">
+    <div class="page-header">
+        <div>
+            <h1>Benutzerverwaltung</h1>
+            <p class="subtitle">Benutzerkonten, Rollen und Aktivstatus verwalten</p>
+        </div>
+        <a class="button-link" href="{{ url_for('dashboard') }}">Zurück zum Dashboard</a>
+    </div>
+
+    <div class="function-area">
+        <h2>Funktionen</h2>
+        <a class="button-link" href="{{ url_for('add_user') }}">Neuen Benutzer anlegen</a>
+    </div>
+
+    <h2>Benutzerkonten</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Benutzername</th>
+                <th>Rolle</th>
+                <th>Status</th>
+                <th>Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for user in users %}
+            <tr>
+                <td>{{ user["id"] }}</td>
+                <td>{{ user["username"] }}</td>
+                <td>
+                    <form method="POST" action="{{ url_for('change_role', user_id=user['id']) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <select name="role" aria-label="Rolle für {{ user['username'] }}">
+                            {% for value, label in [('assistenzarzt', 'Assistenzarzt / Assistenzärztin'), ('oberarzt', 'Oberarzt / Oberärztin'), ('chefarzt', 'Chefarzt / Chefärztin'), ('nurse', 'Pflegekraft'), ('lab', 'Labor'), ('admin', 'Administration')] %}
+                                <option value="{{ value }}" {% if user["role"] == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit">Rolle speichern</button>
+                    </form>
+                </td>
+                <td>
+                    {% if user["is_active"] %}
+                        <span class="badge-green">Aktiv</span>
+                    {% else %}
+                        <span class="badge-red">Deaktiviert</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if user["role"] in ["assistenzarzt", "oberarzt", "nurse", "lab"] %}
+                        <form method="POST" action="{{ url_for('assign_user_stations', user_id=user['id']) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            {% for station in stations %}
+                                <label>
+                                    <input type="checkbox" name="station_ids" value="{{ station['id'] }}"
+                                           {% if station['id'] in station_assignments.get(user['id'], []) %}checked{% endif %}>
+                                    Station {{ station["station_number"] }}
+                                </label>
+                            {% endfor %}
+                            <button type="submit">Stationen speichern</button>
+                        </form>
+                    {% elif user["role"] == "chefarzt" %}
+                        <p><span class="badge">Alle Stationen</span></p>
+                    {% endif %}
+                    {% if user["username"] != session["username"] %}
+                        <form method="POST" action="{{ url_for('toggle_user', user_id=user['id']) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit">
+                                {% if user["is_active"] %}Deaktivieren{% else %}Aktivieren{% endif %}
+                            </button>
+                        </form>
+                    {% else %}
+                        <span class="badge">Aktuelles Konto</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="bottom-actions">
+        <a class="button-link secondary" href="{{ url_for('dashboard') }}">Zurück zum Dashboard</a>
+        <a class="button-link logout" href="{{ url_for('logout') }}">Abmelden</a>
+    </div>
+</div>
+</body>
+</html>

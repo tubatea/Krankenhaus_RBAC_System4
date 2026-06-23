@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Zugriffsprotokolle</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Zugriffsprotokolle</h1>
+            <p class="subtitle">
+                Nachvollziehbarkeit aller Zugriffe auf Patientendaten
+            </p>
+        </div>
+
+        <a class="button-link" href="/dashboard">Zurück zum Dashboard</a>
+    </div>
+
+    <div class="function-area">
+        <h2>Protokolle filtern</h2>
+
+        <form method="GET" action="/logs" class="filter-form">
+            <div>
+                <label>Suche</label>
+                <input
+                    type="text"
+                    name="search"
+                    value="{{ search_query }}"
+                    placeholder="Benutzer, Patient, Datenbereich oder Grund"
+                >
+            </div>
+
+            <div>
+                <label>Rolle</label>
+                <select name="role">
+                    <option value="">Alle Rollen</option>
+                    <option value="assistenzarzt" {% if role_filter == "assistenzarzt" %}selected{% endif %}>Assistenzarzt</option>
+                    <option value="oberarzt" {% if role_filter == "oberarzt" %}selected{% endif %}>Oberarzt</option>
+                    <option value="chefarzt" {% if role_filter == "chefarzt" %}selected{% endif %}>Chefarzt</option>
+                    <option value="nurse" {% if role_filter == "nurse" %}selected{% endif %}>Pflegekraft</option>
+                    <option value="lab" {% if role_filter == "lab" %}selected{% endif %}>Laborpersonal</option>
+                    <option value="admin" {% if role_filter == "admin" %}selected{% endif %}>Administrator</option>
+                </select>
+            </div>
+
+            <button type="submit">Filtern</button>
+        </form>
+    </div>
+
+    <h2>Erfasste Zugriffe</h2>
+
+    {% if logs %}
+        <div class="log-list">
+            {% for log in logs %}
+                <div class="log-card">
+                    <div class="log-header">
+                        <div>
+                            <h3>{{ log["patient_name"] }}</h3>
+                            <p>Patient {{ log["patient_id"] or "–" }} · {{ log["access_time"] }}</p>
+                        </div>
+
+                        {% if is_doctor_role(log["role"]) %}
+                            <span class="badge">{{ role_label(log["role"]) }}</span>
+                        {% elif log["role"] == "nurse" %}
+                            <span class="badge-green">Pflege</span>
+                        {% elif log["role"] == "lab" %}
+                            <span class="badge-yellow">Labor</span>
+                        {% elif log["role"] == "admin" %}
+                            <span class="badge-red">Admin</span>
+                        {% else %}
+                            <span class="badge">{{ log["role"] }}</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="log-details">
+                        <p><strong>Benutzer:</strong> {{ log["username"] }}</p>
+                        <p><strong>Datenbereich:</strong> {{ log["accessed_data"] }}</p>
+                        <p><strong>Aktion:</strong> {{ log["action"] }}</p>
+                        <p><strong>Zugriffsgrund:</strong> {{ log["access_reason"] }}</p>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="note">
+            Keine Zugriffsprotokolle gefunden.
+        </div>
+    {% endif %}
+
+    <br>
+    <a class="button-link logout" href="/logout">Abmelden</a>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Medikationsplan</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Medikationsplan</h1>
+            <p class="subtitle">Übersicht der verordneten und dokumentierten Medikamentengaben</p>
+        </div>
+
+        <a class="button-link" href="/patient/{{ patient['id'] }}">Zurück zum Patienten</a>
+    </div>
+
+    <div class="patient-header">
+        <div>
+            <h2>{{ patient["name"] }}</h2>
+            <p><strong>Geburtsdatum:</strong> {{ patient["birthdate"] }}</p>
+            <p><strong>Patienten-ID:</strong> {{ patient["id"] }}</p>
+        </div>
+
+        <div class="patient-badge">
+            Medikationsplan
+        </div>
+    </div>
+
+    <div class="function-area">
+        <h2>Funktionen</h2>
+
+        {% if is_doctor_role(role) %}
+            <a class="button-link" href="/add_medication/{{ patient['id'] }}">
+                Neue Medikation anlegen
+            </a>
+        {% endif %}
+
+        <a class="button-link secondary" href="/patient_curve/{{ patient['id'] }}">
+            Patientenkurve öffnen
+        </a>
+
+        <a class="button-link secondary" href="/patient/{{ patient['id'] }}">
+            Patientenakte öffnen
+        </a>
+    </div>
+
+    <h2>Aktuelle Medikation</h2>
+
+    {% if medications %}
+        <div class="medication-grid">
+            {% for medication in medications %}
+                <div class="medication-card">
+
+                    <div class="medication-card-header">
+                        <div>
+                            <h3>{{ medication["medication_name"] }}</h3>
+                            <p>{{ medication["dosage"] }} · {{ medication["schedule_time"] }}</p>
+                        </div>
+
+                        {% if medication["status"] == "offen" %}
+                            <span class="badge-red">Offen</span>
+                        {% else %}
+                            <span class="badge-green">Gegeben</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="medication-details">
+                        <p><strong>Dosierung:</strong> {{ medication["dosage"] }}</p>
+                        <p><strong>Zeitpunkt:</strong> {{ medication["schedule_time"] }}</p>
+                        <p><strong>Anweisung:</strong> {{ medication["instructions"] }}</p>
+                        <p><strong>Verordnet von:</strong> {{ medication["prescribed_by"] }}</p>
+                    </div>
+
+                    {% if medication["status"] == "offen" %}
+                        <div class="restricted-box">
+                            Medikamentengabe ist noch offen.
+                        </div>
+
+                        {% if role == "nurse" %}
+                            <form method="POST" action="/administer_medication/{{ medication['id'] }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit">Als gegeben dokumentieren</button>
+                            </form>
+                        {% else %}
+                            <p class="note">
+                                Nur Pflegekräfte oder Administratoren können die Medikamentengabe dokumentieren.
+                            </p>
+                        {% endif %}
+                    {% else %}
+                        <div class="success">
+                            Medikament wurde gegeben.
+                        </div>
+
+                        <p><strong>Gegeben von:</strong> {{ medication["administered_by"] }}</p>
+                        <p><strong>Zeitpunkt:</strong> {{ medication["administered_at"] }}</p>
+                    {% endif %}
+
+                </div>
+            {% endfor %}
+        </div>
+
+        <h2>Tabellarische Ansicht</h2>
+
+        <table>
+            <tr>
+                <th>Medikament</th>
+                <th>Dosierung</th>
+                <th>Zeitpunkt</th>
+                <th>Anweisung</th>
+                <th>Verordnet von</th>
+                <th>Status</th>
+                <th>Durchführung</th>
+            </tr>
+
+            {% for medication in medications %}
+            <tr>
+                <td>{{ medication["medication_name"] }}</td>
+                <td>{{ medication["dosage"] }}</td>
+                <td>{{ medication["schedule_time"] }}</td>
+                <td>{{ medication["instructions"] }}</td>
+                <td>{{ medication["prescribed_by"] }}</td>
+
+                {% if medication["status"] == "offen" %}
+                    <td><span class="badge-red">Offen</span></td>
+                {% else %}
+                    <td><span class="badge-green">Gegeben</span></td>
+                {% endif %}
+
+                <td>
+                    {% if medication["status"] == "offen" %}
+                        {% if role == "nurse" %}
+                            <form method="POST" action="/administer_medication/{{ medication['id'] }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit">Als gegeben markieren</button>
+                            </form>
+                        {% else %}
+                            Noch nicht gegeben
+                        {% endif %}
+                    {% else %}
+                        <p><strong>Gegeben von:</strong> {{ medication["administered_by"] }}</p>
+                        <p><strong>Zeitpunkt:</strong> {{ medication["administered_at"] }}</p>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+
+    {% else %}
+        <div class="note">
+            Keine Medikation vorhanden.
+        </div>
+    {% endif %}
+
+    <br>
+    <a class="button-link" href="/patient/{{ patient['id'] }}">Zurück zum Patienten</a>
+    <a class="button-link logout" href="/logout">Abmelden</a>
+
+</div>
+
+</body>
+</html>

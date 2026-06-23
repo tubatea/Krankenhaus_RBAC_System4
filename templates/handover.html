@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Übergabe</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container wide-container">
+    <div class="page-header">
+        <div>
+            <h1>Stationsübergabe</h1>
+            <p class="subtitle">Dienstübergabe mit automatischen Vitalwert-Hinweisen</p>
+        </div>
+        <a class="button-link secondary" href="{{ url_for('dashboard') }}">Dashboard</a>
+    </div>
+
+    {% if not stations %}
+        <div class="restricted-box">Für dieses Konto ist keine Station freigegeben.</div>
+    {% else %}
+        <div class="function-area">
+            <form method="GET" action="{{ url_for('handover') }}" class="inline-form">
+                <label>Station</label>
+                <select name="station_id">
+                    {% for station in stations %}
+                        <option value="{{ station['id'] }}" {% if selected_station_id == station['id'] %}selected{% endif %}>Station {{ station["station_number"] }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit">Station anzeigen</button>
+            </form>
+            <p><strong>Heutiger Dienst:</strong> {{ current_shift or "Noch nicht eingetragen" }}</p>
+        </div>
+
+        {% if not unlocked %}
+            <div class="access-card">
+                <h2>Übergabezugriff begründen</h2>
+                <p>Der Zugriff gilt 15 Minuten und wird für alle Patienten dieser Station protokolliert.</p>
+                <form method="POST" action="{{ url_for('unlock_handover') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="station_id" value="{{ selected_station_id }}">
+                    <label>Zugriffsgrund</label>
+                    <select name="access_reason"><option value="Übergabe">Übergabe</option></select>
+                    <button type="submit">Übergabe öffnen</button>
+                </form>
+            </div>
+        {% else %}
+            {% if not current_shift %}
+                <div class="alert-box">Bitte trage im Dashboard deinen heutigen Dienst ein, bevor du neue Übergabeinformationen speicherst.</div>
+            {% endif %}
+
+            <div class="handover-grid">
+                {% for patient in patients %}
+                    <article class="handover-card">
+                        <div class="record-title">
+                            <div>
+                                <h2>{{ patient["name"] }}</h2>
+                                <p>Zimmer {{ patient["room_number"] or "–" }} · Bett {{ patient["bed_label"] }} · Station {{ patient["station_number"] }}</p>
+                            </div>
+                            {% if alerts_by_patient.get(patient['id']) %}
+                                <span class="badge-red">Auffällige Vitalwerte</span>
+                            {% else %}
+                                <span class="badge-green">Keine Auffälligkeit</span>
+                            {% endif %}
+                        </div>
+
+                        {% for vital in alerts_by_patient.get(patient['id'], []) %}
+                            <div class="alert-box">
+                                <strong>{{ vital["record_date"] }} {{ vital["record_time"] }}</strong>:
+                                Puls {{ vital["pulse"] or "–" }}, Temperatur {{ vital["temperature"] or "–" }} °C,
+                                SpO₂ {{ vital["oxygen_saturation"] or "–" }} %
+                            </div>
+                        {% endfor %}
+
+                        <h3>Letzte Übergabeinformationen</h3>
+                        {% for note in notes_by_patient.get(patient['id'], [])[:3] %}
+                            <div class="note">
+                                <p>{{ note["note_text"] }}</p>
+                                <small>{{ note["created_at"] }} · {{ note["username"] }} · {{ note["shift_type"] }}</small>
+                            </div>
+                        {% else %}
+                            <p>Noch keine Übergabeinformation vorhanden.</p>
+                        {% endfor %}
+
+                        <form method="POST" action="{{ url_for('add_handover_note', patient_id=patient['id']) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <label>Neue Information</label>
+                            <textarea name="note_text" maxlength="2000" required></textarea>
+                            <button type="submit" {% if not current_shift %}disabled{% endif %}>Information speichern</button>
+                        </form>
+                    </article>
+                {% else %}
+                    <div class="note">Auf dieser Station sind keine Patienten eingetragen.</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Medikation anlegen</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Neue Medikation anlegen</h1>
+            <p class="subtitle">Ärztliche Verordnung für den Medikationsplan erfassen</p>
+        </div>
+
+        <a class="button-link" href="/medication_plan/{{ patient['id'] }}">
+            Zurück zum Medikationsplan
+        </a>
+    </div>
+
+    <div class="patient-header">
+        <div>
+            <h2>{{ patient["name"] }}</h2>
+            <p><strong>Geburtsdatum:</strong> {{ patient["birthdate"] }}</p>
+            <p><strong>Patienten-ID:</strong> {{ patient["id"] }}</p>
+        </div>
+
+        <div class="patient-badge">
+            Neue Verordnung
+        </div>
+    </div>
+
+    {% if message %}
+        <div class="success">
+            {{ message }}
+        </div>
+    {% endif %}
+
+    <div class="form-card">
+        <h2>Medikationsdaten</h2>
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="form-grid">
+
+                <div>
+                    <label for="medication_name">Medikament</label>
+
+                    <select
+                        name="medication_name"
+                        id="medication_name"
+                        required
+                        onchange="showMedicationInfo()"
+                    >
+                        <option value="">Bitte Medikament auswählen</option>
+
+                        {% for name, info in medication_catalog.items() %}
+                            <option
+                                value="{{ name }}"
+                                data-category="{{ info.category|e }}"
+                                data-description="{{ info.description|e }}"
+                            >
+                                {{ name }} – {{ info.category }}
+                            </option>
+                        {% endfor %}
+                    </select>
+
+                    <div id="medication-info" class="medication-info" style="display: none;">
+                        <strong id="medication-category"></strong>
+                        <p id="medication-description"></p>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="dosage">Dosierung</label>
+                    <input
+                        type="text"
+                        id="dosage"
+                        name="dosage"
+                        required
+                        placeholder="z. B. 500 mg"
+                    >
+                </div>
+
+                <div>
+                    <label for="schedule_time">Zeitpunkt</label>
+                    <input
+                        type="text"
+                        id="schedule_time"
+                        name="schedule_time"
+                        required
+                        placeholder="z. B. 08:00 oder 3x täglich"
+                    >
+                </div>
+
+            </div>
+
+            <label for="instructions">Anweisung</label>
+            <textarea
+                id="instructions"
+                name="instructions"
+                placeholder="z. B. nach dem Essen einnehmen, mit ausreichend Wasser"
+            ></textarea>
+
+            <div class="alert-box">
+                Die Medikation wird nach dem Speichern als offene Medikamentengabe im Pflegebereich angezeigt.
+            </div>
+
+            <button type="submit">Medikation speichern</button>
+        </form>
+    </div>
+
+    <div class="function-area">
+        <h2>Navigation</h2>
+
+        <a class="button-link" href="/medication_plan/{{ patient['id'] }}">
+            Medikationsplan öffnen
+        </a>
+
+        <a class="button-link secondary" href="/patient/{{ patient['id'] }}">
+            Patientenakte öffnen
+        </a>
+
+        <a class="button-link secondary" href="/patient_curve/{{ patient['id'] }}">
+            Patientenkurve öffnen
+        </a>
+
+        <a class="button-link logout" href="/logout">
+            Abmelden
+        </a>
+    </div>
+
+</div>
+
+<script>
+    function showMedicationInfo() {
+        const select = document.getElementById("medication_name");
+        const selectedOption = select.options[select.selectedIndex];
+
+        const category = selectedOption.getAttribute("data-category");
+        const description = selectedOption.getAttribute("data-description");
+
+        const infoBox = document.getElementById("medication-info");
+        const categoryElement = document.getElementById("medication-category");
+        const descriptionElement = document.getElementById("medication-description");
+
+        if (category && description) {
+            categoryElement.textContent = category;
+            descriptionElement.textContent = description;
+            infoBox.style.display = "block";
+        } else {
+            categoryElement.textContent = "";
+            descriptionElement.textContent = "";
+            infoBox.style.display = "none";
+        }
+    }
+</script>
+
+</body>
+</html>

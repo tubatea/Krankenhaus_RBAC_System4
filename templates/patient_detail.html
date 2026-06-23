@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Patientenakte</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=10">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <!-- Kopfbereich -->
+    <div class="record-header">
+        <div>
+            <p class="eyebrow">Patientenakte</p>
+            <h1>{{ patient["name"] }}</h1>
+            <p class="subtitle">
+                Rollenbasierter Zugriff mit verpflichtender Zugriffsbegründung
+            </p>
+        </div>
+
+        <div class="header-actions">
+            <a class="button-link secondary" href="/patients">Zurück zur Patientenliste</a>
+        </div>
+    </div>
+
+    <!-- Patientendaten Übersicht -->
+    <div class="patient-summary-card">
+        <div class="patient-avatar">
+            {{ patient["name"][0] }}
+        </div>
+
+        <div class="patient-main-info">
+            <h2>{{ patient["name"] }}</h2>
+            <p>Geburtsdatum: {{ patient["birthdate"] }}</p>
+        </div>
+
+        <div class="patient-info-grid">
+            <div class="info-box">
+                <span>Patienten-ID</span>
+                <strong>{{ patient["id"] }}</strong>
+            </div>
+
+            <div class="info-box">
+                <span>Station</span>
+                <strong>{{ patient["station"] if patient["station"] else "Nicht angegeben" }}</strong>
+            </div>
+
+            <div class="info-box">
+                <span>Diagnose</span>
+                <strong>{{ patient["diagnosis"] if patient["diagnosis"] else "Nicht angegeben" }}</strong>
+            </div>
+
+            <div class="info-box">
+                <span>Status</span>
+                <strong>Aktiv</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schnellzugriffe -->
+    <div class="quick-actions">
+        <a href="/patients/{{ patient['id'] }}/curve" class="quick-action-card">
+            <span class="quick-icon">📈</span>
+            <div>
+                <strong>Patientenkurve</strong>
+                <p>Vitalwerte und Verlauf anzeigen</p>
+            </div>
+        </a>
+
+        <a href="/patients/{{ patient['id'] }}/medications" class="quick-action-card">
+            <span class="quick-icon">💊</span>
+            <div>
+                <strong>Medikationsplan</strong>
+                <p>Medikamente prüfen und dokumentieren</p>
+            </div>
+        </a>
+
+        <a href="/patients/{{ patient['id'] }}/nursing-note" class="quick-action-card">
+            <span class="quick-icon">📝</span>
+            <div>
+                <strong>Pflegeeintrag</strong>
+                <p>Neue Pflegedokumentation erfassen</p>
+            </div>
+        </a>
+
+        <a href="/patients/{{ patient['id'] }}/doctor-order" class="quick-action-card">
+            <span class="quick-icon">🩺</span>
+            <div>
+                <strong>Ärztliche Anordnung</strong>
+                <p>Anordnung erstellen oder ansehen</p>
+            </div>
+        </a>
+
+        <a href="/patients/{{ patient['id'] }}/lab-report" class="quick-action-card">
+            <span class="quick-icon">🧪</span>
+            <div>
+                <strong>Laborbefund</strong>
+                <p>Laborwerte dokumentieren</p>
+            </div>
+        </a>
+    </div>
+
+    <!-- Hauptinhalt -->
+    <div class="record-layout">
+
+        <!-- Linke Spalte -->
+        <div class="record-column">
+
+            <!-- Medikation -->
+            <section class="record-section">
+                <div class="section-header">
+                    <div>
+                        <h2>Medikation</h2>
+                        <p>Aktuelle Medikamente des Patienten</p>
+                    </div>
+                </div>
+
+                {% if medications is defined and medications %}
+                    <div class="table-wrapper">
+                        <table class="clean-table">
+                            <thead>
+                            <tr>
+                                <th>Medikament</th>
+                                <th>Dosierung</th>
+                                <th>Status</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {% for med in medications %}
+                                <tr>
+                                    <td>{{ med["name"] }}</td>
+                                    <td>{{ med["dosage"] }}</td>
+                                    <td>
+                                        <span class="status-pill">
+                                            {{ med["status"] if med["status"] else "Offen" }}
+                                        </span>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="empty-state">
+                        Noch keine Medikamente dokumentiert.
+                    </div>
+                {% endif %}
+            </section>
+
+            <!-- Ärztliche Anordnungen -->
+            <section class="record-section">
+                <div class="section-header">
+                    <div>
+                        <h2>Ärztliche Anordnungen</h2>
+                        <p>Anordnungen und Behandlungsaufträge</p>
+                    </div>
+                </div>
+
+                {% if doctor_orders is defined and doctor_orders %}
+                    <div class="timeline-list">
+                        {% for order in doctor_orders %}
+                            <div class="timeline-item">
+                                <div class="timeline-dot"></div>
+                                <div>
+                                    <strong>{{ order["title"] if order["title"] else "Ärztliche Anordnung" }}</strong>
+                                    <p>{{ order["description"] }}</p>
+                                    <span>{{ order["created_at"] }}</span>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="empty-state">
+                        Noch keine ärztlichen Anordnungen vorhanden.
+                    </div>
+                {% endif %}
+            </section>
+
+        </div>
+
+        <!-- Rechte Spalte -->
+        <div class="record-column">
+
+            <!-- Pflegeeinträge -->
+            <section class="record-section">
+                <div class="section-header">
+                    <div>
+                        <h2>Pflegeeinträge</h2>
+                        <p>Dokumentation aus der Pflege</p>
+                    </div>
+                </div>
+
+                {% if nursing_notes is defined and nursing_notes %}
+                    <div class="note-list">
+                        {% for note in nursing_notes %}
+                            <div class="note-card">
+                                <div class="note-meta">
+                                    <strong>{{ note["created_by"] if note["created_by"] else "Pflege" }}</strong>
+                                    <span>{{ note["created_at"] }}</span>
+                                </div>
+                                <p>{{ note["note"] }}</p>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="empty-state">
+                        Noch keine Pflegeeinträge dokumentiert.
+                    </div>
+                {% endif %}
+            </section>
+
+            <!-- Laborbefunde -->
+            <section class="record-section">
+                <div class="section-header">
+                    <div>
+                        <h2>Laborbefunde</h2>
+                        <p>Aktuelle Laborwerte und Befunde</p>
+                    </div>
+                </div>
+
+                {% if lab_reports is defined and lab_reports %}
+                    <div class="table-wrapper">
+                        <table class="clean-table">
+                            <thead>
+                            <tr>
+                                <th>Parameter</th>
+                                <th>Wert</th>
+                                <th>Datum</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {% for lab in lab_reports %}
+                                <tr>
+                                    <td>{{ lab["parameter"] }}</td>
+                                    <td>{{ lab["value"] }}</td>
+                                    <td>{{ lab["created_at"] }}</td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="empty-state">
+                        Noch keine Laborbefunde vorhanden.
+                    </div>
+                {% endif %}
+            </section>
+
+        </div>
+    </div>
+
+    <!-- Zugriffsprotokoll -->
+    <section class="record-section full-width-section">
+        <div class="section-header">
+            <div>
+                <h2>Zugriffsprotokoll</h2>
+                <p>Dokumentierte Zugriffe auf diese Patientenakte</p>
+            </div>
+        </div>
+
+        {% if access_logs is defined and access_logs %}
+            <div class="table-wrapper">
+                <table class="clean-table">
+                    <thead>
+                    <tr>
+                        <th>Benutzer</th>
+                        <th>Rolle</th>
+                        <th>Begründung</th>
+                        <th>Zeitpunkt</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for log in access_logs %}
+                        <tr>
+                            <td>{{ log["username"] }}</td>
+                            <td>{{ log["role"] }}</td>
+                            <td>{{ log["reason"] }}</td>
+                            <td>{{ log["timestamp"] }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                Keine Zugriffe dokumentiert.
+            </div>
+        {% endif %}
+    </section>
+
+</div>
+
+</body>
+</html>

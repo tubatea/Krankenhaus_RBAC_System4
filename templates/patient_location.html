@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Aufnahme und Verlegung</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container wide-container">
+    <div class="page-header">
+        <div>
+            <h1>Aufnahme und Patientenbewegung</h1>
+            <p class="subtitle">{{ patient["name"] }}</p>
+        </div>
+        <a class="button-link secondary" href="{{ url_for('patients') }}">Patientenliste</a>
+    </div>
+
+    {% if message %}<div class="success">{{ message }}</div>{% endif %}
+
+    <div class="patient-header">
+        {% if patient["admission_id"] %}
+            <div>
+                <h2>Aktiv aufgenommen</h2>
+                <p>Station {{ patient["station_number"] }} · Zimmer {{ patient["room_number"] }} · Bett {{ patient["bed_label"] }}</p>
+                <p>Aufgenommen am {{ patient["admitted_at"] }}</p>
+            </div>
+            <span class="badge-green">Stationär</span>
+        {% else %}
+            <div><h2>Aktuell nicht aufgenommen</h2></div>
+            <span class="badge-yellow">Entlassen</span>
+        {% endif %}
+    </div>
+
+    {% if patient["admission_id"] %}
+        <div class="record-grid">
+            <div class="form-card">
+                <h2>Patient verlegen</h2>
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="transfer">
+                    <label>Freies Zielbett</label>
+                    <select name="bed_id" required>
+                        {% for bed in beds %}
+                            <option value="{{ bed['id'] }}">Station {{ bed["station_number"] }} · Zimmer {{ bed["room_number"] }} · Bett {{ bed["bed_label"] }}</option>
+                        {% endfor %}
+                    </select>
+                    <label>Verlegungsgrund</label>
+                    <textarea name="reason" maxlength="500" required></textarea>
+                    <button type="submit" {% if not beds %}disabled{% endif %}>Verlegung speichern</button>
+                </form>
+            </div>
+
+            <div class="form-card">
+                <h2>Patient entlassen</h2>
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="discharge">
+                    <label>Entlassungsgrund</label>
+                    <textarea name="reason" maxlength="500" required></textarea>
+                    <button type="submit" class="logout">Entlassung dokumentieren</button>
+                </form>
+            </div>
+        </div>
+    {% else %}
+        <div class="form-card">
+            <h2>Patient erneut aufnehmen</h2>
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="admit">
+                <label>Freies Bett</label>
+                <select name="bed_id" required>
+                    {% for bed in beds %}
+                        <option value="{{ bed['id'] }}">Station {{ bed["station_number"] }} · Zimmer {{ bed["room_number"] }} · Bett {{ bed["bed_label"] }}</option>
+                    {% endfor %}
+                </select>
+                <label>Aufnahmegrund</label>
+                <textarea name="reason" maxlength="500" required></textarea>
+                <button type="submit" {% if not beds %}disabled{% endif %}>Aufnahme speichern</button>
+            </form>
+        </div>
+    {% endif %}
+
+    <h2>Aufnahmehistorie</h2>
+    <div class="record-grid">
+        {% for admission in admissions %}
+            <div class="record-card">
+                <h3>Station {{ admission["station_number"] }} · Zimmer {{ admission["room_number"] }} · Bett {{ admission["bed_label"] }}</h3>
+                <p><strong>Aufnahme:</strong> {{ admission["admitted_at"] }} · {{ admission["admitted_by"] or "Migration" }}</p>
+                <p><strong>Grund:</strong> {{ admission["admission_reason"] }}</p>
+                {% if admission["discharged_at"] %}
+                    <p><strong>Entlassung:</strong> {{ admission["discharged_at"] }} · {{ admission["discharged_by"] }}</p>
+                    <p><strong>Entlassungsgrund:</strong> {{ admission["discharge_reason"] }}</p>
+                {% else %}
+                    <span class="badge-green">Aktiv</span>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+
+    <h2>Verlegungshistorie</h2>
+    {% for transfer in transfers %}
+        <div class="record-card">
+            <p><strong>{{ transfer["transferred_at"] }}</strong> · {{ transfer["username"] }}</p>
+            <p>Station {{ transfer["from_station"] }}, Zimmer {{ transfer["from_room"] }}, Bett {{ transfer["from_bed"] }}
+                → Station {{ transfer["to_station"] }}, Zimmer {{ transfer["to_room"] }}, Bett {{ transfer["to_bed"] }}</p>
+            <p><strong>Grund:</strong> {{ transfer["transfer_reason"] }}</p>
+        </div>
+    {% else %}
+        <div class="note">Keine Verlegung dokumentiert.</div>
+    {% endfor %}
+</div>
+</body>
+</html>

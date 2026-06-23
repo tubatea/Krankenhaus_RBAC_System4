@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard | Krankenhaus-RBAC-System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=50">
+</head>
+<body>
+
+<div class="dashboard-shell">
+
+    <!-- Kopfbereich -->
+    <header class="dashboard-hero">
+        <div class="hero-left">
+            <div class="system-label">Krankenhaus-RBAC-System</div>
+            <h1>Dashboard</h1>
+            <p>
+                Willkommen, <strong>{{ username }}</strong>.
+                Deine Ansicht wird automatisch nach Rolle, Station und Dienst gefiltert.
+            </p>
+        </div>
+
+        <div class="hero-right">
+            <div class="role-card">
+                <span class="role-title">Angemeldet als</span>
+                <strong>{{ role_label }}</strong>
+            </div>
+
+            <div class="clock-card">
+                <span>Aktuelle Uhrzeit</span>
+                <strong id="live-clock">--:--:--</strong>
+            </div>
+        </div>
+    </header>
+
+    <!-- Datenschutz Hinweis -->
+    <section class="privacy-banner">
+        <div>
+            <strong>Datenschutz aktiv</strong>
+            <p>
+                Patientendaten werden nur nach Rollenberechtigung, Stationszugriff und dokumentiertem Zugriffsgrund angezeigt.
+            </p>
+        </div>
+        <span class="privacy-pill">Audit-Logging aktiviert</span>
+    </section>
+
+    <!-- Heutiger Dienst: NUR Anzeige, kein Formular -->
+    {% if role in ["assistenzarzt", "oberarzt", "chefarzt", "nurse"] %}
+        <section class="dashboard-section">
+            <div class="section-heading">
+                <div>
+                    <h2>Heutiger Dienst</h2>
+                    <p>Der Dienst wurde nach dem Login ausgewählt und gilt für diese Sitzung.</p>
+                </div>
+            </div>
+
+            <div class="duty-panel">
+                <div class="duty-info">
+                    {% if current_shift %}
+                        <span class="status-dot green"></span>
+                        <div>
+                            <span class="small-label">Aktueller Dienst</span>
+                            <strong>{{ current_shift }}</strong>
+                        </div>
+                    {% else %}
+                        <span class="status-dot orange"></span>
+                        <div>
+                            <span class="small-label">Aktueller Dienst</span>
+                            <strong>Kein Dienst ausgewählt</strong>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="station-info">
+                    <span class="small-label">Sichtbare Stationen</span>
+                    <div class="station-list">
+                        {% if stations %}
+                            {% for station in stations %}
+                                <span class="station-chip">Station {{ station["station_number"] }}</span>
+                            {% endfor %}
+                        {% else %}
+                            <span class="station-chip warning">Keine Station zugewiesen</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    {% endif %}
+
+    <!-- Übersicht -->
+    <section class="dashboard-section">
+        <div class="section-heading">
+            <div>
+                <h2>Übersicht</h2>
+                <p>Wichtige Kennzahlen für deinen aktuellen Zugriff.</p>
+            </div>
+        </div>
+
+        <div class="kpi-grid">
+
+            <div class="kpi-card">
+                <div class="kpi-icon blue">P</div>
+                <div>
+                    <span class="kpi-label">Patienten</span>
+                    <strong class="kpi-number">{{ patient_count }}</strong>
+                    <p>Sichtbar nach Rolle, Station und Dienst</p>
+                </div>
+            </div>
+
+            {% if role in ["assistenzarzt", "oberarzt", "chefarzt", "nurse"] %}
+                <div class="kpi-card">
+                    <div class="kpi-icon purple">A</div>
+                    <div>
+                        <span class="kpi-label">Offene Anordnungen</span>
+                        <strong class="kpi-number">{{ open_orders_count }}</strong>
+                        <p>Noch nicht erledigte ärztliche Anordnungen</p>
+                    </div>
+                </div>
+            {% endif %}
+
+            {% if role == "nurse" %}
+                <div class="kpi-card">
+                    <div class="kpi-icon green">M</div>
+                    <div>
+                        <span class="kpi-label">Offene Medikamente</span>
+                        <strong class="kpi-number">{{ open_medications_count }}</strong>
+                        <p>Medikamente, die noch verabreicht werden müssen</p>
+                    </div>
+                </div>
+            {% endif %}
+
+            {% if is_doctor %}
+                <div class="kpi-card">
+                    <div class="kpi-icon orange">B</div>
+                    <div>
+                        <span class="kpi-label">Arzt-Benachrichtigungen</span>
+                        <strong class="kpi-number">{{ open_notifications_count }}</strong>
+                        <p>Offene Hinweise aus dem Pflegebereich</p>
+                    </div>
+                </div>
+            {% endif %}
+
+            {% if role == "admin" %}
+                <div class="kpi-card">
+                    <div class="kpi-icon blue">U</div>
+                    <div>
+                        <span class="kpi-label">Benutzer</span>
+                        <strong class="kpi-number">{{ user_count }}</strong>
+                        <p>Angelegte Benutzer im System</p>
+                    </div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-icon red">L</div>
+                    <div>
+                        <span class="kpi-label">Zugriffslogs</span>
+                        <strong class="kpi-number">{{ access_logs_count }}</strong>
+                        <p>Dokumentierte Zugriffe auf Patientendaten</p>
+                    </div>
+                </div>
+            {% endif %}
+
+        </div>
+    </section>
+
+    <!-- Arzt-Benachrichtigungen -->
+    {% if is_doctor %}
+        <section class="dashboard-section">
+            <div class="section-heading">
+                <div>
+                    <h2>Offene Arzt-Benachrichtigungen</h2>
+                    <p>Meldungen aus der Pflege, die ärztlich geprüft werden sollten.</p>
+                </div>
+            </div>
+
+            {% if notifications %}
+                <div class="notification-list">
+                    {% for notification in notifications %}
+                        <div class="notification-item">
+                            <div class="notification-main">
+                                <span class="notification-dot"></span>
+                                <div>
+                                    <strong>{{ notification["patient_name"] }}</strong>
+                                    <p>{{ notification["message"] }}</p>
+                                    <small>Erstellt am: {{ notification["created_at"] }}</small>
+                                </div>
+                            </div>
+
+                            <form method="POST" action="/close_notification/{{ notification['id'] }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="small-btn" type="submit">Schließen</button>
+                            </form>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-card">
+                    <strong>Keine offenen Benachrichtigungen</strong>
+                    <p>Aktuell liegen keine neuen Meldungen aus dem Pflegebereich vor.</p>
+                </div>
+            {% endif %}
+        </section>
+    {% endif %}
+
+    <!-- Schnellzugriff -->
+    <section class="dashboard-section">
+        <div class="section-heading">
+            <div>
+                <h2>Schnellzugriff</h2>
+                <p>Funktionen, die für deine Rolle freigeschaltet sind.</p>
+            </div>
+        </div>
+
+        <div class="quick-action-grid">
+
+            {% if role in ["assistenzarzt", "oberarzt", "chefarzt", "nurse", "lab", "admin"] %}
+                <a class="quick-action" href="{{ url_for('patients') }}">
+                    <span>Patienten</span>
+                    <strong>Patienten anzeigen</strong>
+                    <p>Patientenliste und Aktenzugriff öffnen</p>
+                </a>
+            {% endif %}
+
+            {% if role in ["assistenzarzt", "oberarzt", "chefarzt", "nurse"] %}
+                <a class="quick-action" href="{{ url_for('handover') }}">
+                    <span>Übergabe</span>
+                    <strong>Übergabe öffnen</strong>
+                    <p>Dienstübergabe und wichtige Hinweise ansehen</p>
+                </a>
+            {% endif %}
+
+            {% if role == "admin" %}
+                <a class="quick-action" href="{{ url_for('users') }}">
+                    <span>Admin</span>
+                    <strong>Benutzerverwaltung</strong>
+                    <p>Rollen und Stationszuweisungen verwalten</p>
+                </a>
+
+                <a class="quick-action" href="{{ url_for('add_user') }}">
+                    <span>Admin</span>
+                    <strong>Benutzer anlegen</strong>
+                    <p>Neuen Benutzer im System erstellen</p>
+                </a>
+
+                <a class="quick-action" href="{{ url_for('logs') }}">
+                    <span>Audit</span>
+                    <strong>Zugriffslogs</strong>
+                    <p>Protokollierte Patientenzugriffe prüfen</p>
+                </a>
+
+                <a class="quick-action" href="{{ url_for('add_patient') }}">
+                    <span>Aufnahme</span>
+                    <strong>Patient aufnehmen</strong>
+                    <p>Neuen Patienten mit Bett und Station anlegen</p>
+                </a>
+            {% endif %}
+
+            <a class="quick-action danger-action" href="/logout">
+                <span>Session</span>
+                <strong>Abmelden</strong>
+                <p>Sitzung sicher beenden</p>
+            </a>
+
+        </div>
+    </section>
+
+</div>
+
+<script>
+    function updateClock() {
+        const now = new Date();
+
+        const formatted = now.toLocaleString("de-DE", {
+            weekday: "short",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        });
+
+        document.getElementById("live-clock").textContent = formatted;
+    }
+
+    updateClock();
+    setInterval(updateClock, 1000);
+</script>
+
+</body>
+</html>

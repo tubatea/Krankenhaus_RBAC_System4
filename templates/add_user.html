@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Benutzer anlegen</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Neuen Benutzer anlegen</h1>
+            <p class="subtitle">Benutzerkonto erstellen und Rolle im Krankenhaus-System zuweisen</p>
+        </div>
+
+        <a class="button-link" href="/dashboard">
+            Zurück zum Dashboard
+        </a>
+    </div>
+
+    {% if message %}
+        <div class="success">
+            {{ message }}
+        </div>
+    {% endif %}
+
+    <div class="form-card">
+        <h2>Benutzerdaten</h2>
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-grid">
+                <div>
+                    <label>Benutzername</label>
+                    <input
+                        type="text"
+                        name="username"
+                        required
+                        placeholder="z. B. arzt2 oder pflege2"
+                    >
+                </div>
+
+                <div>
+                    <label>Passwort</label>
+                    <input
+                        type="password"
+                        name="password"
+                        required
+                        placeholder="Passwort eingeben"
+                    >
+                </div>
+
+                <div>
+                    <label>Rolle</label>
+                    <select name="role" required>
+                        <option value="">Bitte auswählen</option>
+                        <option value="assistenzarzt">Assistenzarzt / Assistenzärztin</option>
+                        <option value="oberarzt">Oberarzt / Oberärztin</option>
+                        <option value="chefarzt">Chefarzt / Chefärztin</option>
+                        <option value="nurse">Pflegekraft</option>
+                        <option value="lab">Laborpersonal</option>
+                        <option value="admin">Administrator</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="alert-box">
+                Die ausgewählte Rolle bestimmt, welche Patientendaten der Benutzer sehen und bearbeiten darf.
+            </div>
+
+            <button type="submit">Benutzer anlegen</button>
+        </form>
+    </div>
+
+    <div class="function-area">
+        <h2>Navigation</h2>
+
+        <a class="button-link" href="/users">
+            Benutzerverwaltung öffnen
+        </a>
+
+        <a class="button-link secondary" href="/dashboard">
+            Dashboard öffnen
+        </a>
+
+        <a class="button-link logout" href="/logout">
+            Abmelden
+        </a>
+    </div>
+
+</div>
+
+</body>
+</html>

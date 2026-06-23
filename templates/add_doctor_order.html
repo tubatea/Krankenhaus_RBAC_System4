@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Ärztliche Anordnung hinzufügen</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Ärztliche Anordnung hinzufügen</h1>
+            <p class="subtitle">Neue ärztliche Anweisung für Pflege oder Behandlung erfassen</p>
+        </div>
+
+        <a class="button-link" href="/patient/{{ patient['id'] }}">
+            Zurück zum Patienten
+        </a>
+    </div>
+
+    <div class="patient-header">
+        <div>
+            <h2>{{ patient["name"] }}</h2>
+            <p><strong>Geburtsdatum:</strong> {{ patient["birthdate"] }}</p>
+            <p><strong>Patienten-ID:</strong> {{ patient["id"] }}</p>
+        </div>
+
+        <div class="patient-badge">
+            Ärztliche Anordnung
+        </div>
+    </div>
+
+    {% if message %}
+        <div class="success">
+            {{ message }}
+        </div>
+    {% endif %}
+
+    <div class="form-card">
+        <h2>Anordnung erfassen</h2>
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Ärztliche Anordnung</label>
+            <textarea
+                name="order_text"
+                required
+                placeholder="z. B. Blutdruck 3x täglich messen, Labor morgen kontrollieren, bei Verschlechterung Arzt informieren."
+            ></textarea>
+
+            <div class="alert-box">
+                Die Anordnung wird nach dem Speichern als offene Aufgabe in der Pflege-Aufgabenübersicht angezeigt.
+            </div>
+
+            <button type="submit">Anordnung speichern</button>
+        </form>
+    </div>
+
+    <div class="function-area">
+        <h2>Navigation</h2>
+
+        <a class="button-link" href="/patient/{{ patient['id'] }}">
+            Patientenakte öffnen
+        </a>
+
+        <a class="button-link secondary" href="/patient_curve/{{ patient['id'] }}">
+            Patientenkurve öffnen
+        </a>
+
+        <a class="button-link secondary" href="/medication_plan/{{ patient['id'] }}">
+            Medikationsplan öffnen
+        </a>
+
+        <a class="button-link logout" href="/logout">
+            Abmelden
+        </a>
+    </div>
+
+</div>
+
+</body>
+</html>

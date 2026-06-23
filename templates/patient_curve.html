@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Patientenkurve</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+    <h1>Patientenkurve</h1>
+
+    <div class="patient-header">
+        <div>
+            <h2>{{ patient["name"] }}</h2>
+            <p><strong>Geburtsdatum:</strong> {{ patient["birthdate"] }}</p>
+        </div>
+
+        <div class="patient-badge">
+            Tageskurve
+        </div>
+    </div>
+
+    {% if message %}
+        <p class="success">{{ message }}</p>
+    {% endif %}
+
+    <h2>Tagesübersicht</h2>
+
+    <div class="cards">
+        <div class="card">
+            <p>{{ summary["entries"] }}</p>
+            <h3>Einträge</h3>
+        </div>
+
+        <div class="card">
+            <p>{{ summary["abnormal_count"] }}</p>
+            <h3>Auffälligkeiten</h3>
+        </div>
+
+        <div class="card">
+            <p>{{ summary["max_pulse"] }}</p>
+            <h3>Max. Puls</h3>
+        </div>
+
+        <div class="card">
+            <p>{{ summary["max_temperature"] }}</p>
+            <h3>Max. Temperatur</h3>
+        </div>
+
+        <div class="card">
+            <p>{{ summary["min_spo2"] }}</p>
+            <h3>Min. SpO₂</h3>
+        </div>
+    </div>
+
+    {% if curve_rows %}
+        <h2>Verlauf der Vitalwerte</h2>
+
+        <div class="chart-card">
+            <canvas id="vitalChart"></canvas>
+        </div>
+    {% endif %}
+
+    <h2>Tag auswählen</h2>
+
+    <form method="GET" action="/patient_curve/{{ patient['id'] }}" class="form-card">
+        <label>Datum</label>
+        <input type="date" name="date" value="{{ selected_date }}">
+        <button type="submit">Tag anzeigen</button>
+    </form>
+
+    {% if role == "nurse" %}
+        <h2>Neue Werte eintragen</h2>
+
+        <form method="POST" class="form-card">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-grid">
+                <div>
+                    <label>Datum</label>
+                    <input type="date" name="record_date" value="{{ selected_date }}" required>
+                </div>
+
+                <div>
+                    <label>Uhrzeit</label>
+                    <input type="time" name="record_time" required>
+                </div>
+
+                <div>
+                    <label>Blutdruck</label>
+                    <input type="text" name="blood_pressure" placeholder="z. B. 130/85">
+                </div>
+
+                <div>
+                    <label>Puls</label>
+                    <input type="number" name="pulse" placeholder="z. B. 76">
+                </div>
+
+                <div>
+                    <label>Temperatur</label>
+                    <input type="number" step="0.1" name="temperature" placeholder="z. B. 36.8">
+                </div>
+
+                <div>
+                    <label>SpO₂</label>
+                    <input type="number" name="oxygen_saturation" placeholder="z. B. 98">
+                </div>
+            </div>
+
+            <label>Bemerkung</label>
+            <textarea name="note" placeholder="z. B. Patient stabil, gegessen um 08:30 Uhr"></textarea>
+
+            <button type="submit">Werte speichern</button>
+        </form>
+    {% endif %}
+
+    <h2>Tagesverlauf</h2>
+
+    {% if curve_rows %}
+        <div class="timeline">
+            {% for row in curve_rows %}
+                <div class="timeline-item {% if row['status'] == 'auffällig' %}timeline-alert{% endif %}">
+                    <div class="timeline-time">
+                        {{ row["data"]["record_time"] }}
+                    </div>
+
+                    <div class="timeline-content">
+                        <div class="timeline-top">
+                            <strong>{{ row["data"]["record_date"] }}</strong>
+
+                            {% if row["status"] == "auffällig" %}
+                                <span class="status-red">Auffällig</span>
+                            {% else %}
+                                <span class="status-green">Normal</span>
+                            {% endif %}
+                        </div>
+
+                        <div class="vital-grid">
+                            <div>
+                                <span>Blutdruck</span>
+                                <strong>{{ row["data"]["blood_pressure"] }}</strong>
+                            </div>
+
+                            <div>
+                                <span>Puls</span>
+                                <strong>{{ row["data"]["pulse"] }}</strong>
+                            </div>
+
+                            <div>
+                                <span>Temperatur</span>
+                                <strong>{{ row["data"]["temperature"] }} °C</strong>
+                            </div>
+
+                            <div>
+                                <span>SpO₂</span>
+                                <strong>{{ row["data"]["oxygen_saturation"] }} %</strong>
+                            </div>
+                        </div>
+
+                        <p><strong>Hinweis:</strong> {{ row["alerts"] }}</p>
+                        <p><strong>Bemerkung:</strong> {{ row["data"]["note"] }}</p>
+                        <p class="small-text">Erfasst von: {{ row["data"]["recorded_by"] }}</p>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <h2>Tabellarische Ansicht</h2>
+
+        <table>
+            <tr>
+                <th>Datum</th>
+                <th>Uhrzeit</th>
+                <th>Blutdruck</th>
+                <th>Puls</th>
+                <th>Temperatur</th>
+                <th>SpO₂</th>
+                <th>Status</th>
+                <th>Bemerkung</th>
+                <th>Erfasst von</th>
+            </tr>
+
+            {% for row in curve_rows %}
+            <tr>
+                <td>{{ row["data"]["record_date"] }}</td>
+                <td>{{ row["data"]["record_time"] }}</td>
+                <td>{{ row["data"]["blood_pressure"] }}</td>
+                <td>{{ row["data"]["pulse"] }}</td>
+                <td>{{ row["data"]["temperature"] }}</td>
+                <td>{{ row["data"]["oxygen_saturation"] }}</td>
+
+                {% if row["status"] == "auffällig" %}
+                    <td><span class="status-red">Auffällig</span></td>
+                {% else %}
+                    <td><span class="status-green">Normal</span></td>
+                {% endif %}
+
+                <td>{{ row["data"]["note"] }}</td>
+                <td>{{ row["data"]["recorded_by"] }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    {% else %}
+        <p class="note">Für diesen Tag wurden noch keine Werte eingetragen.</p>
+    {% endif %}
+
+    {% if role == "nurse" %}
+        <h2>Arzt informieren</h2>
+
+        <form method="POST" action="/notify_doctor/{{ patient['id'] }}" class="form-card">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Nachricht an den Arzt</label>
+            <textarea name="message" required placeholder="z. B. Patient hat um 12:00 Uhr Puls 110, Temperatur 38.2 und SpO₂ 92 %. Bitte ärztlich prüfen."></textarea>
+
+            <button type="submit">Arzt informieren</button>
+        </form>
+    {% endif %}
+
+    {% if is_doctor_role(role) %}
+        <h2>Ärztliche Anordnung aus der Kurve erstellen</h2>
+
+        <form method="POST" action="/add_order_from_curve/{{ patient['id'] }}" class="form-card">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Anordnung</label>
+            <textarea name="order_text" required placeholder="z. B. Vitalwerte engmaschig kontrollieren, Laborwerte morgen prüfen, Arzt bei Verschlechterung informieren."></textarea>
+
+            <button type="submit">Anordnung erstellen</button>
+        </form>
+    {% endif %}
+
+    <br>
+    <a class="button-link" href="/patient/{{ patient['id'] }}">Zurück zum Patienten</a>
+    <a class="button-link logout" href="/logout">Abmelden</a>
+</div>
+
+{% if curve_rows %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    const labels = {{ chart_labels | tojson }};
+    const pulseData = {{ chart_pulse | tojson }};
+    const temperatureData = {{ chart_temperature | tojson }};
+    const spo2Data = {{ chart_spo2 | tojson }};
+
+    const ctx = document.getElementById("vitalChart");
+
+    new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: "Puls",
+                    data: pulseData,
+                    borderWidth: 3,
+                    pointRadius: 6,
+                    pointHoverRadius: 8,
+                    tension: 0.25,
+                    yAxisID: "y"
+                },
+                {
+                    label: "SpO₂ %",
+                    data: spo2Data,
+                    borderWidth: 3,
+                    pointRadius: 6,
+                    pointHoverRadius: 8,
+                    tension: 0.25,
+                    yAxisID: "y"
+                },
+                {
+                    label: "Temperatur °C",
+                    data: temperatureData,
+                    borderWidth: 3,
+                    pointRadius: 6,
+                    pointHoverRadius: 8,
+                    tension: 0.25,
+                    yAxisID: "y1"
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: "index",
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    position: "bottom"
+                },
+                title: {
+                    display: true,
+                    text: "Verlauf von Puls, SpO₂ und Temperatur"
+                }
+            },
+            scales: {
+                y: {
+                    type: "linear",
+                    position: "left",
+                    title: {
+                        display: true,
+                        text: "Puls / SpO₂"
+                    },
+                    min: 50,
+                    max: 120
+                },
+                y1: {
+                    type: "linear",
+                    position: "right",
+                    title: {
+                        display: true,
+                        text: "Temperatur °C"
+                    },
+                    min: 35,
+                    max: 40,
+                    grid: {
+                        drawOnChartArea: false
+                    }
+                }
+            }
+        }
+    });
+</script>
+{% endif %}
+
+</body>
+</html>

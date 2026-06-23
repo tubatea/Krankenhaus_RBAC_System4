@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Dienst auswählen</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=30">
+</head>
+<body>
+
+<div class="container">
+    <div class="page-header">
+        <div>
+            <h1>Dienstbeginn</h1>
+            <p class="subtitle">Bitte wähle deinen heutigen Dienst aus.</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>In welchem Dienst bist du heute?</h2>
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="form-group">
+                <label for="shift_type">Dienst auswählen</label>
+                <select name="shift_type" id="shift_type" required>
+    <option value="">Bitte auswählen</option>
+    <option value="Tagdienst">Tagdienst</option>
+    <option value="Spätdienst">Spätdienst</option>
+    <option value="Nachtdienst">Nachtdienst</option>
+</select>
+            </div>
+
+            <button type="submit">Dienst starten</button>
+        </form>
+
+        <p class="subtitle">
+            Hinweis: Im Nachtdienst siehst du Station 48 und 49 gemeinsam.
+            Im Frühdienst und Spätdienst siehst du nur deine zugewiesene Station.
+        </p>
+    </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Pflege-Aufgabenübersicht</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Pflege-Aufgabenübersicht</h1>
+            <p class="subtitle">
+                Übersicht offener ärztlicher Anordnungen und Medikamentengaben
+            </p>
+        </div>
+
+        <a class="button-link" href="/dashboard">Zurück zum Dashboard</a>
+    </div>
+
+    <div class="cards">
+        <div class="card">
+            <p>{{ open_orders|length }}</p>
+            <h3>Offene Anordnungen</h3>
+        </div>
+
+        <div class="card">
+            <p>{{ open_medications|length }}</p>
+            <h3>Offene Medikamentengaben</h3>
+        </div>
+    </div>
+
+    <h2>Offene ärztliche Anordnungen</h2>
+
+    {% if open_orders %}
+        <div class="task-grid">
+            {% for order in open_orders %}
+                <div class="task-card order-task">
+                    <div class="task-header">
+                        <div>
+                            <h3>{{ order["patient_name"] }}</h3>
+                            <p>Station {{ order["station_number"] }} · Zimmer {{ order["room_number"] or "–" }} · Bett {{ order["bed_label"] }}</p>
+                            <p>{{ order["created_at"] }}</p>
+                        </div>
+
+                        <span class="badge-red">Offen</span>
+                    </div>
+
+                    <div class="task-details">
+                        <p><strong>Anordnung:</strong> {{ order["order_text"] }}</p>
+                        <p><strong>Erstellt von:</strong> {{ order["doctor_username"] }}</p>
+                    </div>
+
+                    <div class="task-actions">
+                        <a class="button-link secondary" href="/patient/{{ order['patient_id'] }}">
+                            Patient öffnen
+                        </a>
+
+                        <form method="POST" action="/complete_order/{{ order['id'] }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit">Als erledigt markieren</button>
+                        </form>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="note">Keine offenen ärztlichen Anordnungen.</div>
+    {% endif %}
+
+    <h2>Offene Medikamentengaben</h2>
+
+    {% if open_medications %}
+        <div class="task-grid">
+            {% for medication in open_medications %}
+                <div class="task-card medication-task">
+                    <div class="task-header">
+                        <div>
+                            <h3>{{ medication["patient_name"] }}</h3>
+                            <p>Station {{ medication["station_number"] }} · Zimmer {{ medication["room_number"] or "–" }} · Bett {{ medication["bed_label"] }}</p>
+                            <p>{{ medication["schedule_time"] }}</p>
+                        </div>
+
+                        <span class="badge-red">Offen</span>
+                    </div>
+
+                    <div class="task-details">
+                        <p><strong>Medikament:</strong> {{ medication["medication_name"] }}</p>
+                        <p><strong>Dosierung:</strong> {{ medication["dosage"] }}</p>
+                        <p><strong>Anweisung:</strong> {{ medication["instructions"] }}</p>
+                        <p><strong>Verordnet von:</strong> {{ medication["prescribed_by"] }}</p>
+                    </div>
+
+                    <div class="task-actions">
+                        <a class="button-link secondary" href="/medication_plan/{{ medication['patient_id'] }}">
+                            Medikationsplan öffnen
+                        </a>
+
+                        <form method="POST" action="/administer_medication/{{ medication['id'] }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit">Als gegeben markieren</button>
+                        </form>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="note">Keine offenen Medikamentengaben.</div>
+    {% endif %}
+
+    <br>
+    <a class="button-link logout" href="/logout">Abmelden</a>
+
+</div>
+
+</body>
+</html>

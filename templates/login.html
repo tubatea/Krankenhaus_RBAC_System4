@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Login</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="container">
+    <h1>Krankenhaus Zugriffssystem</h1>
+    <h2>Login</h2>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+   <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label>Benutzername</label>
+    <input type="text" name="username" required>
+
+    <label>Passwort</label>
+    <input type="password" name="password" required>
+
+    <button type="submit">Einloggen</button>
+</form>
+    </select>
+</div>
+
+        <button type="submit">Einloggen</button>
+    </form>
+
+    <div class="info-box">
+        <p><strong>Test-Logins:</strong></p>
+        <p>arzt / 1234</p>
+        <p>pflege / 1234</p>
+        <p>labor / 1234</p>
+        <p>admin / 1234</p>
+    </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Pflegeeintrag hinzufügen</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Pflegeeintrag hinzufügen</h1>
+            <p class="subtitle">Pflegedokumentation für die Patientenakte erfassen</p>
+        </div>
+
+        <a class="button-link" href="/patient/{{ patient['id'] }}">
+            Zurück zum Patienten
+        </a>
+    </div>
+
+    <div class="patient-header">
+        <div>
+            <h2>{{ patient["name"] }}</h2>
+            <p><strong>Geburtsdatum:</strong> {{ patient["birthdate"] }}</p>
+            <p><strong>Patienten-ID:</strong> {{ patient["id"] }}</p>
+        </div>
+
+        <div class="patient-badge">
+            Pflegeeintrag
+        </div>
+    </div>
+
+    {% if message %}
+        <div class="success">
+            {{ message }}
+        </div>
+    {% endif %}
+
+    <div class="form-card">
+        <h2>Eintrag erfassen</h2>
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Art des Eintrags</label>
+            <select name="note_type" required>
+                <option value="">Bitte auswählen</option>
+                <option value="Vitalwerte">Vitalwerte</option>
+                <option value="Beobachtung">Beobachtung</option>
+                <option value="Pflegemaßnahme">Pflegemaßnahme</option>
+                <option value="Schmerzangabe">Schmerzangabe</option>
+                <option value="Mobilisation">Mobilisation</option>
+                <option value="Essen/Trinken">Essen/Trinken</option>
+            </select>
+
+            <label>Pflegeeintrag</label>
+            <textarea
+                name="note_text"
+                required
+                placeholder="z. B. 08:30 Patient hat gefrühstückt. Blutdruck 130/85, Puls 76. Patient wirkt stabil."
+            ></textarea>
+
+            <div class="alert-box">
+                Der Pflegeeintrag wird dauerhaft in der Patientenakte dokumentiert und mit dem angemeldeten Benutzer gespeichert.
+            </div>
+
+            <button type="submit">Pflegeeintrag speichern</button>
+        </form>
+    </div>
+
+    <div class="function-area">
+        <h2>Navigation</h2>
+
+        <a class="button-link" href="/patient/{{ patient['id'] }}">
+            Patientenakte öffnen
+        </a>
+
+        <a class="button-link secondary" href="/patient_curve/{{ patient['id'] }}">
+            Patientenkurve öffnen
+        </a>
+
+        <a class="button-link secondary" href="/medication_plan/{{ patient['id'] }}">
+            Medikationsplan öffnen
+        </a>
+
+        <a class="button-link logout" href="/logout">
+            Abmelden
+        </a>
+    </div>
+
+</div>
+
+</body>
+</html>

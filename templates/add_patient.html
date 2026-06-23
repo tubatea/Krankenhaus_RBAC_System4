@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Patient aufnehmen</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <div class="page-header">
+        <div>
+            <h1>Patient aufnehmen</h1>
+            <p class="subtitle">Stammdaten, Aufnahmegrund und freies Bett erfassen</p>
+        </div>
+        <a class="button-link secondary" href="{{ url_for('patients') }}">Patientenliste</a>
+    </div>
+
+    {% if message %}<div class="success">{{ message }}</div>{% endif %}
+
+    <div class="form-card">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-grid">
+                <div>
+                    <label>Name</label>
+                    <input type="text" name="name" maxlength="200" required>
+                </div>
+                <div>
+                    <label>Geburtsdatum</label>
+                    <input type="date" name="birthdate" required>
+                </div>
+            </div>
+
+            <label>Freies Bett</label>
+            <select name="bed_id" required>
+                {% for bed in beds %}
+                    <option value="{{ bed['id'] }}">Station {{ bed["station_number"] }} · Zimmer {{ bed["room_number"] }} · Bett {{ bed["bed_label"] }}</option>
+                {% else %}
+                    <option value="">Kein freies Bett vorhanden</option>
+                {% endfor %}
+            </select>
+
+            <label>Aufnahmegrund</label>
+            <textarea name="admission_reason" maxlength="500" required></textarea>
+
+            <div class="alert-box">
+                Ein Bett kann immer nur einer aktiven Aufnahme zugeordnet sein.
+                Medizinische Diagnosen werden anschließend durch ärztliches Personal dokumentiert.
+            </div>
+            <button type="submit" {% if not beds %}disabled{% endif %}>Patient aufnehmen</button>
+        </form>
+    </div>
+</div>
+</body>
+</html>
