@@ -2,20 +2,19 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Laborbefund hinzufügen</title>
+    <title>Labor & Befund hinzufügen</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
 <div class="container wide-container">
-
     <div class="page-header">
         <div>
-            <h1>Laborbefund hinzufügen</h1>
-            <p class="subtitle">Laborwerte erfassen und der Patientenakte hinzufügen</p>
+            <h1>Labor & Befund hinzufügen</h1>
+            <p class="subtitle">Laborwerte, Bildgebung und Befundbilder strukturiert in der Patientenakte speichern</p>
         </div>
 
-        <a class="button-link" href="/patient/{{ patient['id'] }}">
+        <a class="button-link" href="{{ url_for('patient_detail', patient_id=patient['id']) }}">
             Zurück zur Patientenakte
         </a>
     </div>
@@ -28,86 +27,184 @@
         </div>
 
         <div class="patient-badge">
-            Laborbefund
+            Labor / Bildgebung
         </div>
     </div>
 
     {% if message %}
-        <div class="success">
-            {{ message }}
-        </div>
+        <div class="success">{{ message }}</div>
     {% endif %}
 
-    <div class="form-card">
-        <h2>Befund erfassen</h2>
+    <div class="lab-entry-layout">
+        <div class="form-card lab-form-card">
+            <h2>Befund erfassen</h2>
 
-        <form method="POST">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="form-grid">
-                <div>
-                    <label>Untersuchung</label>
+            <form method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <div class="form-grid">
+                    {% if open_lab_requests %}
+                    <div>
+                        <label>Offene Anforderung zuordnen</label>
+                        <select name="lab_request_id">
+                            <option value="">Keine Zuordnung</option>
+                            {% for request in open_lab_requests %}
+                                <option value="{{ request['id'] }}">
+                                    {{ request["priority"] }} · {{ request["request_type"] }} · {{ request["test_name"] }} · von {{ request["requested_by"] }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
+
+                    <div>
+                        <label>Befundart</label>
+                        <select name="report_type" required>
+                            <option value="Laborwert">Laborwert</option>
+                            <option value="Mikrobiologie">Mikrobiologie</option>
+                            <option value="Bildgebung">Bildgebung / CT / Röntgen</option>
+                            <option value="Pathologie">Pathologie</option>
+                            <option value="Sonstiger Befund">Sonstiger Befund</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label>Status</label>
+                        <select name="status" required>
+                            <option value="final">Final</option>
+                            <option value="vorläufig">Vorläufig</option>
+                            <option value="kritisch">Kritisch</option>
+                            <option value="angefordert">Angefordert</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label>Untersuchung / Befundname</label>
+                        <input
+                            type="text"
+                            name="test_name"
+                            required
+                            placeholder="z. B. CRP, Blutbild, CT Thorax, Röntgen"
+                        >
+                    </div>
+
+                    <div>
+                        <label>Material / Modalität</label>
+                        <input
+                            type="text"
+                            name="sample_material"
+                            placeholder="z. B. Serum, Blutkultur, CT, Röntgen"
+                        >
+                    </div>
+
+                    <div>
+                        <label>Ergebnis</label>
+                        <input
+                            type="text"
+                            name="result_value"
+                            required
+                            placeholder="z. B. 85, Infiltrat rechts basal, ohne Nachweis"
+                        >
+                    </div>
+
+                    <div>
+                        <label>Einheit</label>
+                        <input
+                            type="text"
+                            name="result_unit"
+                            placeholder="z. B. mg/l, G/l, %, mm"
+                        >
+                    </div>
+
+                    <div>
+                        <label>Referenzbereich</label>
+                        <input
+                            type="text"
+                            name="reference_range"
+                            placeholder="z. B. < 5 mg/l"
+                        >
+                    </div>
+
+                    <div>
+                        <label>Entnahme / Untersuchung am</label>
+                        <input type="datetime-local" name="collected_at">
+                    </div>
+                </div>
+
+                <label>Bewertung / Interpretation</label>
+                <textarea
+                    name="interpretation"
+                    placeholder="z. B. deutlich erhöht, Hinweis auf Entzündung; CT ohne frische Blutung"
+                ></textarea>
+
+                <label>Interne Notiz</label>
+                <textarea
+                    name="notes"
+                    placeholder="z. B. telefonisch an Arzt gemeldet, Kontrolle empfohlen"
+                ></textarea>
+
+                <div class="upload-panel">
+                    <div>
+                        <h3>Bildanhänge</h3>
+                        <p>PNG, JPG, JPEG, WEBP oder GIF hochladen, z. B. CT-Screenshot, Röntgenbild oder Befundfoto.</p>
+                    </div>
+
+                    <label>Dateien auswählen</label>
+                    <input
+                        type="file"
+                        name="attachments"
+                        multiple
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                    >
+
+                    <label>Beschreibung der Anhänge</label>
                     <input
                         type="text"
-                        name="test_name"
-                        required
-                        placeholder="z. B. CRP, Leukozyten, HbA1c"
+                        name="file_description"
+                        placeholder="z. B. CT Thorax Screenshot, axialer Schnitt"
                     >
                 </div>
 
-                <div>
-                    <label>Ergebnis</label>
-                    <input
-                        type="text"
-                        name="result_value"
-                        required
-                        placeholder="z. B. 85 mg/l"
-                    >
+                <div class="alert-box">
+                    Der Befund wird dauerhaft in der Patientenakte gespeichert und ist für berechtigte Rollen sichtbar.
                 </div>
 
-                <div>
-                    <label>Referenzbereich</label>
-                    <input
-                        type="text"
-                        name="reference_range"
-                        placeholder="z. B. < 5 mg/l"
-                    >
-                </div>
+                <button type="submit">Befund speichern</button>
+            </form>
+        </div>
+
+        <aside class="lab-help-card">
+            <h2>Beispiele</h2>
+            <div class="lab-example">
+                <strong>Laborwert</strong>
+                <p>CRP · Serum · 48 mg/l · Referenz &lt; 5 mg/l</p>
             </div>
-
-            <label>Bewertung / Interpretation</label>
-            <textarea
-                name="interpretation"
-                placeholder="z. B. deutlich erhöht, Hinweis auf Entzündung"
-            ></textarea>
-
-            <div class="alert-box">
-                Der Laborbefund wird dauerhaft in der Patientenakte gespeichert und ist für berechtigte Rollen sichtbar.
+            <div class="lab-example">
+                <strong>Bildgebung</strong>
+                <p>CT Thorax · Befundtext eintragen · PNG/JPG Bild anhängen</p>
             </div>
-
-            <button type="submit">Laborbefund speichern</button>
-        </form>
+            <div class="lab-example">
+                <strong>Kritischer Befund</strong>
+                <p>Status „Kritisch“ wählen und ärztliche Information in die Notiz schreiben.</p>
+            </div>
+        </aside>
     </div>
 
     <div class="function-area">
         <h2>Navigation</h2>
 
-        <a class="button-link" href="/patient/{{ patient['id'] }}">
+        <a class="button-link" href="{{ url_for('patient_detail', patient_id=patient['id']) }}">
             Patientenakte öffnen
         </a>
 
-        <a class="button-link secondary" href="/patient_curve/{{ patient['id'] }}">
+        <a class="button-link secondary" href="{{ url_for('patient_curve', patient_id=patient['id']) }}">
             Patientenkurve öffnen
         </a>
 
-        <a class="button-link secondary" href="/medication_plan/{{ patient['id'] }}">
-            Medikationsplan öffnen
-        </a>
-
-        <a class="button-link logout" href="/logout">
+        <a class="button-link logout" href="{{ url_for('logout') }}">
             Abmelden
         </a>
     </div>
-
 </div>
 
 </body>

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Arztbrief-Entwürfe</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container wide-container">
+    <div class="page-header">
+        <div>
+            <h1>Meine Arztbrief-Entwürfe</h1>
+            <p class="subtitle">Noch nicht veröffentlichte Arztbriefe schnell wiederfinden und weiterbearbeiten.</p>
+        </div>
+        <a class="button-link secondary" href="{{ url_for('dashboard') }}">Dashboard</a>
+    </div>
+
+    {% if drafts %}
+        <div class="draft-grid">
+            {% for draft in drafts %}
+                <article class="draft-card">
+                    <div>
+                        <p class="eyebrow">Station {{ draft["station_number"] }} · Zimmer {{ draft["room_number"] }} · Bett {{ draft["bed_label"] }}</p>
+                        <h2>{{ draft["patient_name"] }}</h2>
+                        <p>Geburtsdatum: {{ draft["birthdate"] }}</p>
+                    </div>
+
+                    <div class="draft-preview">
+                        {{ draft["content"][:220] }}{% if draft["content"]|length > 220 %}...{% endif %}
+                    </div>
+
+                    <div class="draft-footer">
+                        <span>Zuletzt gespeichert: {{ draft["updated_at"] }}</span>
+                        <a class="button-link" href="{{ url_for('arztbrief', patient_id=draft['patient_id']) }}">
+                            Weiterbearbeiten
+                        </a>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-card">
+            <strong>Keine Entwürfe vorhanden</strong>
+            <p>Autosaves erscheinen hier, sobald ein Arztbrief begonnen und noch nicht veröffentlicht wurde.</p>
+        </div>
+    {% endif %}
+</div>
+</body>
+</html>

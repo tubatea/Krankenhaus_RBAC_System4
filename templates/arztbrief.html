@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Arztbrief erstellen</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=80">
+</head>
+<body>
+
+<div class="container wide-container">
+
+    <div class="page-header">
+        <div>
+            <h1>Arztbrief erstellen</h1>
+            <p class="subtitle">
+                Patient: <strong>{{ patient["name"] }}</strong>
+            </p>
+        </div>
+
+        <a class="button-link secondary" href="{{ url_for('patient_detail', patient_id=patient['id']) }}">
+            Zurück zur Patientenakte
+        </a>
+    </div>
+
+    <section class="record-section">
+        <form method="POST" id="arztbrief-form">
+            <input type="hidden" name="csrf_token" id="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="patient_id" id="patient_id" value="{{ patient['id'] }}">
+            <input type="hidden" name="draft_type" id="draft_type" value="arztbrief">
+
+            <div class="form-group">
+                <label for="title">Titel</label>
+                <input type="text" name="title" id="title" value="Arztbrief">
+            </div>
+
+            <div class="form-group">
+                <label for="arztbrief_content">Inhalt des Arztbriefs</label>
+                <textarea
+                    name="arztbrief_content"
+                    id="arztbrief_content"
+                    rows="16"
+                    placeholder="Arztbrief hier schreiben..."
+                >{{ draft_content }}</textarea>
+            </div>
+
+            <p id="autosave-status" class="hint-text">
+                Entwurf wird automatisch gespeichert.
+            </p>
+
+            <button type="submit">Arztbrief veröffentlichen</button>
+        </form>
+    </section>
+
+</div>
+
+<script>
+    let inactivityTimer;
+    const TIMEOUT_MS = 10 * 60 * 1000;
+
+    function autosaveDraft() {
+        const contentField = document.getElementById("arztbrief_content");
+        const patientField = document.getElementById("patient_id");
+        const csrfField = document.getElementById("csrf_token");
+        const statusText = document.getElementById("autosave-status");
+
+        if (!contentField || !patientField || !csrfField) {
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("csrf_token", csrfField.value);
+        formData.append("patient_id", patientField.value);
+        formData.append("draft_type", "arztbrief");
+        formData.append("content", contentField.value);
+
+        fetch("/autosave_draft", {
+            method: "POST",
+            body: formData
+        })
+        .then(response => {
+            if (response.ok) {
+                const now = new Date();
+                statusText.textContent = "Entwurf automatisch gespeichert um " + now.toLocaleTimeString("de-DE");
+            } else {
+                statusText.textContent = "Entwurf konnte gerade nicht gespeichert werden.";
+            }
+        })
+        .catch(() => {
+            statusText.textContent = "Entwurf konnte gerade nicht gespeichert werden.";
+        });
+    }
+
+    function logoutAfterInactivity() {
+        autosaveDraft();
+
+        setTimeout(() => {
+            window.location.href = "/logout";
+        }, 700);
+    }
+
+    function resetInactivityTimer() {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(logoutAfterInactivity, TIMEOUT_MS);
+    }
+
+    ["click", "keydown", "mousemove", "scroll", "input"].forEach(eventName => {
+        document.addEventListener(eventName, resetInactivityTimer);
+    });
+
+    setInterval(autosaveDraft, 15000);
+    resetInactivityTimer();
+</script>
+
+</body>
+</html>

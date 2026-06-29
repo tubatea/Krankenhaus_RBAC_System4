@@ -48,6 +48,26 @@
         </a>
     </div>
 
+    {% if patient_warnings %}
+        <section class="record-section full-width-section">
+            <div class="section-header">
+                <div>
+                    <h2>Warnhinweise vor Medikation</h2>
+                    <p>Bitte vor Verordnung und Gabe prüfen.</p>
+                </div>
+            </div>
+            <div class="warning-grid">
+                {% for warning in patient_warnings %}
+                    <div class="warning-card {{ warning['severity'] }}">
+                        <strong>{{ warning["title"] }}</strong>
+                        <span>{{ warning["warning_type"] }}</span>
+                        <p>{{ warning["description"] }}</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+
     <h2>Aktuelle Medikation</h2>
 
     {% if medications %}
@@ -63,6 +83,10 @@
 
                         {% if medication["status"] == "offen" %}
                             <span class="badge-red">Offen</span>
+                        {% elif medication["status"] == "pausiert" %}
+                            <span class="badge-yellow">Pausiert</span>
+                        {% elif medication["status"] == "abgesetzt" %}
+                            <span class="badge-red">Abgesetzt</span>
                         {% else %}
                             <span class="badge-green">Gegeben</span>
                         {% endif %}
@@ -80,7 +104,7 @@
                             Medikamentengabe ist noch offen.
                         </div>
 
-                        {% if role == "nurse" %}
+                        {% if is_nurse_role(role) %}
                             <form method="POST" action="/administer_medication/{{ medication['id'] }}">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit">Als gegeben dokumentieren</button>
@@ -90,6 +114,13 @@
                                 Nur Pflegekräfte oder Administratoren können die Medikamentengabe dokumentieren.
                             </p>
                         {% endif %}
+                    {% elif medication["status"] == "pausiert" %}
+                        <div class="alert-box">Medikation ist pausiert seit {{ medication["paused_at"] }}.</div>
+                    {% elif medication["status"] == "abgesetzt" %}
+                        <div class="restricted-box">
+                            Medikation wurde abgesetzt.
+                            {% if medication["stop_reason"] %}<br>Grund: {{ medication["stop_reason"] }}{% endif %}
+                        </div>
                     {% else %}
                         <div class="success">
                             Medikament wurde gegeben.
@@ -97,6 +128,20 @@
 
                         <p><strong>Gegeben von:</strong> {{ medication["administered_by"] }}</p>
                         <p><strong>Zeitpunkt:</strong> {{ medication["administered_at"] }}</p>
+                    {% endif %}
+
+                    {% if is_doctor_role(role) and medication["status"] == "offen" %}
+                        <div class="medication-action-row">
+                            <form method="POST" action="{{ url_for('pause_medication', medication_id=medication['id']) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="secondary">Pausieren</button>
+                            </form>
+                            <form method="POST" action="{{ url_for('stop_medication', medication_id=medication['id']) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="text" name="stop_reason" placeholder="Grund">
+                                <button type="submit" class="logout">Absetzen</button>
+                            </form>
+                        </div>
                     {% endif %}
 
                 </div>
@@ -132,7 +177,7 @@
 
                 <td>
                     {% if medication["status"] == "offen" %}
-                        {% if role == "nurse" %}
+                        {% if is_nurse_role(role) %}
                             <form method="POST" action="/administer_medication/{{ medication['id'] }}">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit">Als gegeben markieren</button>

@@ -53,6 +53,11 @@
                         {% if patient["admission_id"] %}
                             <p><strong>Station:</strong> {{ patient["station_number"] }}</p>
                             <p><strong>Zimmer / Bett:</strong> {{ patient["room_number"] }} / {{ patient["bed_label"] }}</p>
+                            {% if patient["abnormal_vitals_count"] and patient["abnormal_vitals_count"] > 0 %}
+                                <p><span class="badge-red">Auffällige Vitalwerte</span></p>
+                            {% else %}
+                                <p><span class="badge-green">Vitalwerte unauffällig</span></p>
+                            {% endif %}
                         {% else %}
                             <p><span class="badge-yellow">Aktuell entlassen</span></p>
                         {% endif %}
@@ -63,7 +68,7 @@
                             Patientenakte öffnen
                         </a>
 
-                        {% if is_doctor_role(session["role"]) or session["role"] == "nurse" %}
+                        {% if is_doctor_role(session["role"]) or is_nurse_role(session["role"]) %}
                             <a class="button-link secondary" href="/patient_curve/{{ patient['id'] }}">
                                 Patientenkurve
                             </a>

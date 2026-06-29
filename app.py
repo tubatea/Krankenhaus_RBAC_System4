@@ -1,17 +1,19 @@
 import os
 import secrets
 import sqlite3
-from datetime import date, datetime, timezone
+import uuid
+from datetime import date, datetime, timezone, timedelta
 from functools import wraps
+from pathlib import Path
 
 from flask import Flask, abort, render_template, request, redirect, session, url_for
+from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 from database import create_database
 
-
 app = Flask(__name__)
 
-
+app.permanent_session_lifetime = timedelta(minutes=10)
 
 configured_secret_key = os.environ.get("SECRET_KEY")
 if os.environ.get("FLASK_ENV") == "production" and not configured_secret_key:
@@ -22,12 +24,18 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("FLASK_ENV") == "production",
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024,
 )
+
+LAB_UPLOAD_FOLDER = Path(app.root_path) / "static" / "uploads" / "lab_reports"
+ALLOWED_LAB_FILE_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif"}
+LAB_UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
 PATIENT_ACCESS_TTL_SECONDS = 15 * 60
 DOCTOR_ROLES = {"assistenzarzt", "oberarzt", "chefarzt"}
-CLINICAL_ROLES = DOCTOR_ROLES | {"nurse", "lab"}
-SHIFT_ROLES = DOCTOR_ROLES | {"nurse"}
+NURSE_ROLES = {"nurse", "nurse_48", "nurse_49"}
+CLINICAL_ROLES = DOCTOR_ROLES | NURSE_ROLES | {"lab"}
+SHIFT_ROLES = DOCTOR_ROLES | NURSE_ROLES
 def get_today_shift():
     if "username" not in session:
         return None
@@ -41,6 +49,7 @@ def get_today_shift():
         SELECT shift_type FROM duty_shifts
         WHERE user_id = ? AND duty_date = ?
     """, (user_id, date.today().isoformat())).fetchone()
+
     connection.close()
 
     return shift["shift_type"] if shift else None
@@ -50,6 +59,8 @@ ROLE_ACCESS_REASONS = {
     "oberarzt": ("Behandlung", "Notfall", "Übergabe"),
     "chefarzt": ("Behandlung", "Notfall", "Übergabe"),
     "nurse": ("Pflege", "Notfall", "Übergabe"),
+    "nurse_48": ("Pflege", "Notfall", "Übergabe"),
+    "nurse_49": ("Pflege", "Notfall", "Übergabe"),
     "lab": ("Laboruntersuchung", "Notfall"),
     "admin": ("Administrative Prüfung",),
 }
@@ -57,12 +68,36 @@ VALID_ACCESS_REASONS = {
     reason for reasons in ROLE_ACCESS_REASONS.values() for reason in reasons
 }
 
+
+def normalize_access_reason(reason):
+    return (reason or "").replace("Ãœ", "Ü")
+
+
+def is_allowed_lab_file(filename):
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_LAB_FILE_EXTENSIONS
+    )
+
+
+def save_lab_file(file_storage):
+    original_filename = secure_filename(file_storage.filename or "")
+    if not original_filename or not is_allowed_lab_file(original_filename):
+        return None
+
+    LAB_UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+    extension = original_filename.rsplit(".", 1)[1].lower()
+    stored_filename = f"{uuid.uuid4().hex}.{extension}"
+    file_storage.save(LAB_UPLOAD_FOLDER / stored_filename)
+    return stored_filename, original_filename, extension
+
 DOCTOR_PERMISSIONS = {
         "patients.view", "patient.basic", "diagnosis.view", "medication.view",
         "diagnosis.create", "diagnosis.resolve",
         "medication.create", "lab.view", "vitals.view", "nursing_notes.view",
         "orders.view", "orders.create", "notifications.manage",
         "handover.view", "handover.create", "shifts.set",
+        "lab_requests.create", "lab_requests.view", "warnings.create",
 }
 
 PERMISSIONS = {
@@ -75,8 +110,21 @@ PERMISSIONS = {
         "orders.view", "orders.complete", "notifications.create",
         "handover.view", "handover.create", "shifts.set",
     },
+    "nurse_48": {
+        "patients.view", "patient.basic", "medication.view", "medication.administer",
+        "vitals.view", "vitals.create", "nursing_notes.view", "nursing_notes.create",
+        "orders.view", "orders.complete", "notifications.create",
+        "handover.view", "handover.create", "shifts.set",
+    },
+    "nurse_49": {
+        "patients.view", "patient.basic", "medication.view", "medication.administer",
+        "vitals.view", "vitals.create", "nursing_notes.view", "nursing_notes.create",
+        "orders.view", "orders.complete", "notifications.create",
+        "handover.view", "handover.create", "shifts.set",
+    },
     "lab": {
         "patients.view", "patient.basic", "lab.view", "lab.create",
+        "lab_requests.view", "lab_requests.manage",
     },
     "admin": {
         "patients.view", "patient.basic", "patients.manage", "users.manage", "logs.view",
@@ -343,13 +391,38 @@ def get_csrf_token():
         session["csrf_token"] = token
     return token
 
+@app.before_request
+def check_session_timeout():
+    # Diese Endpunkte sollen den Inaktivitäts-Timer nicht verlängern.
+    allowed_routes = {"login", "logout", "static", "autosave_draft"}
+
+    if request.endpoint in allowed_routes:
+        return
+
+    if "username" not in session:
+        return
+
+    last_activity = session.get("last_activity")
+
+    if last_activity:
+        last_activity_time = datetime.fromisoformat(last_activity)
+        now = datetime.now()
+
+        if now - last_activity_time > timedelta(minutes=10):
+            session.clear()
+            return redirect(url_for("login"))
+
+    session["last_activity"] = datetime.now().isoformat()
+
 
 @app.context_processor
 def inject_csrf_token():
     return {
         "csrf_token": get_csrf_token,
         "is_doctor_role": is_doctor_role,
+        "is_nurse_role": is_nurse_role,
         "role_label": get_role_label,
+        "has_permission": has_permission,
     }
 
 
@@ -366,10 +439,15 @@ def protect_post_requests():
 
 @app.before_request
 def require_shift_selection():
+    if app.config.get("TESTING"):
+        return None
+
     allowed_endpoints = {
         "login",
         "logout",
         "choose_shift",
+        "set_shift",
+        "autosave_draft",
         "static",
     }
 
@@ -391,14 +469,14 @@ def get_db_connection():
     connection = sqlite3.connect("hospital.db")
     connection.row_factory = sqlite3.Row
     return connection
-
-
 def get_role_label(role):
     role_labels = {
         "assistenzarzt": "Assistenzarzt / Assistenzärztin",
         "oberarzt": "Oberarzt / Oberärztin",
         "chefarzt": "Chefarzt / Chefärztin",
         "nurse": "Pflegekraft",
+        "nurse_48": "Pflegekraft Station 48",
+        "nurse_49": "Pflegekraft Station 49",
         "lab": "Laborpersonal",
         "admin": "Administrator"
     }
@@ -408,6 +486,10 @@ def get_role_label(role):
 
 def is_doctor_role(role):
     return role in DOCTOR_ROLES
+
+
+def is_nurse_role(role):
+    return role in NURSE_ROLES
 
 
 def get_session_user_id():
@@ -431,7 +513,7 @@ def get_accessible_station_ids():
 
     connection = get_db_connection()
 
-    if role == "admin":
+    if role in {"admin", "chefarzt"}:
         rows = connection.execute("""
             SELECT id FROM stations
             ORDER BY station_number
@@ -439,6 +521,16 @@ def get_accessible_station_ids():
 
         connection.close()
         return [row["id"] for row in rows]
+
+    if role in {"nurse_48", "nurse_49"}:
+        station_number = "48" if role == "nurse_48" else "49"
+        row = connection.execute("""
+            SELECT id FROM stations
+            WHERE station_number = ?
+        """, (station_number,)).fetchone()
+
+        connection.close()
+        return [row["id"]] if row else []
 
     current_shift = get_today_shift()
 
@@ -559,7 +651,7 @@ def has_unlocked_patient_access(patient_id):
     if age > PATIENT_ACCESS_TTL_SECONDS:
         session.pop(f"patient_access_{patient_id}", None)
         return False
-    return grant.get("reason") in ROLE_ACCESS_REASONS.get(session.get("role"), ())
+    return normalize_access_reason(grant.get("reason")) in ROLE_ACCESS_REASONS.get(session.get("role"), ())
 
 
 def get_patient_access_reason(patient_id):
@@ -578,14 +670,51 @@ def audit_patient_access(patient, accessed_data, action="view"):
         action,
     )
 
-
 def require_patient_access(patient_id):
     if not can_access_patient(patient_id):
         abort(403)
+
     if not has_unlocked_patient_access(patient_id):
-        return redirect(url_for("patient_detail", patient_id=patient_id))
+        next_url = request.full_path if request.query_string else request.path
+        return redirect(url_for(
+            "patient_detail",
+            patient_id=patient_id,
+            next=next_url
+        ))
 
     return None
+
+def create_draft_and_letter_tables():
+    connection = get_db_connection()
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS drafts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            patient_id INTEGER,
+            draft_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, patient_id, draft_type)
+        )
+    """)
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS doctor_letters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            author_user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    connection.commit()
+    connection.close()
+
+
+create_draft_and_letter_tables()
 
 
 @app.route("/")
@@ -619,6 +748,8 @@ def login():
             session["username"] = user["username"]
             session["role"] = user["role"]
             session["user_id"] = user["id"]
+            session.permanent = True
+            session["last_activity"] = datetime.now().isoformat()
 
             if user["role"] in SHIFT_ROLES:
                 return redirect(url_for("choose_shift"))
@@ -695,6 +826,13 @@ def dashboard():
     open_orders_count = 0
     open_medications_count = 0
     open_notifications_count = 0
+    urgent_patients = []
+    nurse_order_tasks = []
+    nurse_medication_tasks = []
+    latest_lab_reports = []
+    pending_lab_requests = []
+    critical_lab_reports = []
+    draft_count = 0
 
     if station_ids:
         placeholders = ",".join("?" for _ in station_ids)
@@ -710,6 +848,133 @@ def dashboard():
             """,
             station_ids
         ).fetchone()[0]
+
+        urgent_patients = connection.execute(
+            f"""
+            SELECT DISTINCT
+                patients.id,
+                patients.name,
+                locations.station_number,
+                locations.room_number,
+                locations.bed_label,
+                vital_signs.record_date,
+                vital_signs.record_time,
+                vital_signs.pulse,
+                vital_signs.temperature,
+                vital_signs.oxygen_saturation
+            FROM vital_signs
+            JOIN patients ON patients.id = vital_signs.patient_id
+            JOIN current_patient_locations locations
+              ON locations.patient_id = patients.id
+            WHERE locations.station_id IN ({placeholders})
+              AND (
+                vital_signs.pulse > 100
+                OR vital_signs.temperature >= 38.0
+                OR vital_signs.oxygen_saturation < 94
+              )
+            ORDER BY vital_signs.record_date DESC, vital_signs.record_time DESC
+            LIMIT 5
+            """,
+            station_ids
+        ).fetchall()
+
+        if is_nurse_role(role):
+            nurse_order_tasks = connection.execute(
+                f"""
+                SELECT doctor_orders.*, patients.name AS patient_name,
+                       locations.station_number, locations.room_number, locations.bed_label
+                FROM doctor_orders
+                JOIN patients ON patients.id = doctor_orders.patient_id
+                JOIN current_patient_locations locations
+                  ON locations.patient_id = patients.id
+                WHERE doctor_orders.status = 'offen'
+                  AND locations.station_id IN ({placeholders})
+                ORDER BY doctor_orders.created_at DESC
+                LIMIT 5
+                """,
+                station_ids
+            ).fetchall()
+
+            nurse_medication_tasks = connection.execute(
+                f"""
+                SELECT medication_plan.*, patients.name AS patient_name,
+                       locations.station_number, locations.room_number, locations.bed_label
+                FROM medication_plan
+                JOIN patients ON patients.id = medication_plan.patient_id
+                JOIN current_patient_locations locations
+                  ON locations.patient_id = patients.id
+                WHERE medication_plan.status = 'offen'
+                  AND locations.station_id IN ({placeholders})
+                ORDER BY medication_plan.schedule_time
+                LIMIT 5
+                """,
+                station_ids
+            ).fetchall()
+
+        if is_doctor_role(role):
+            latest_lab_reports = connection.execute(
+                f"""
+                SELECT lab_reports.*, patients.name AS patient_name,
+                       locations.station_number, locations.room_number, locations.bed_label
+                FROM lab_reports
+                JOIN patients ON patients.id = lab_reports.patient_id
+                JOIN current_patient_locations locations
+                  ON locations.patient_id = patients.id
+                WHERE locations.station_id IN ({placeholders})
+                ORDER BY lab_reports.created_at DESC
+                LIMIT 5
+                """,
+                station_ids
+            ).fetchall()
+
+            critical_lab_reports = connection.execute(
+                f"""
+                SELECT lab_reports.*, patients.name AS patient_name,
+                       locations.station_number, locations.room_number, locations.bed_label
+                FROM lab_reports
+                JOIN patients ON patients.id = lab_reports.patient_id
+                JOIN current_patient_locations locations
+                  ON locations.patient_id = patients.id
+                WHERE locations.station_id IN ({placeholders})
+                  AND lab_reports.status = 'kritisch'
+                ORDER BY lab_reports.created_at DESC
+                LIMIT 5
+                """,
+                station_ids
+            ).fetchall()
+
+            draft_count = connection.execute(
+                """
+                SELECT COUNT(*) FROM drafts
+                WHERE user_id = ? AND draft_type = 'arztbrief'
+                """,
+                (get_session_user_id(),)
+            ).fetchone()[0]
+
+        if has_permission(role, "lab_requests.view"):
+            pending_lab_requests = connection.execute(
+                f"""
+                SELECT lab_requests.*, patients.name AS patient_name,
+                       users.username AS requested_by,
+                       locations.station_number, locations.room_number, locations.bed_label
+                FROM lab_requests
+                JOIN patients ON patients.id = lab_requests.patient_id
+                JOIN users ON users.id = lab_requests.requested_by_user_id
+                JOIN current_patient_locations locations
+                  ON locations.patient_id = patients.id
+                WHERE lab_requests.status IN ('offen', 'in Arbeit')
+                  AND locations.station_id IN ({placeholders})
+                ORDER BY
+                  CASE lab_requests.priority
+                    WHEN 'kritisch' THEN 1
+                    WHEN 'dringend' THEN 2
+                    ELSE 3
+                  END,
+                  lab_requests.created_at DESC
+                LIMIT 6
+                """,
+                station_ids
+            ).fetchall()
 
         open_medications_count = connection.execute(
             f"""
@@ -806,6 +1071,13 @@ def dashboard():
         current_shift=current_shift,
         stations=stations,
         is_doctor=is_doctor_role(role),
+        urgent_patients=urgent_patients,
+        nurse_order_tasks=nurse_order_tasks,
+        nurse_medication_tasks=nurse_medication_tasks,
+        latest_lab_reports=latest_lab_reports,
+        critical_lab_reports=critical_lab_reports,
+        pending_lab_requests=pending_lab_requests,
+        draft_count=draft_count,
     )
 
 @app.route("/patients")
@@ -820,11 +1092,23 @@ def patients():
 
     connection = get_db_connection()
 
+    station_ids = get_accessible_station_ids()
+
     # Admin sieht alle Patienten
     if session["role"] == "admin":
         query = """
             SELECT patients.*, locations.station_number, locations.room_number,
-                   locations.bed_label, locations.admission_id
+                   locations.bed_label, locations.admission_id,
+                   (
+                     SELECT COUNT(*)
+                     FROM vital_signs
+                     WHERE vital_signs.patient_id = patients.id
+                       AND (
+                         vital_signs.pulse > 100
+                         OR vital_signs.temperature >= 38.0
+                         OR vital_signs.oxygen_saturation < 94
+                       )
+                   ) AS abnormal_vitals_count
             FROM patients
             LEFT JOIN current_patient_locations locations
               ON locations.patient_id = patients.id
@@ -840,26 +1124,34 @@ def patients():
 
         patient_list = connection.execute(query, parameters).fetchall()
 
+    # Nicht-Admin ohne Stationszuweisung sieht einfach keine Patienten,
+    # wird aber NICHT zum Login geschickt
+    elif not station_ids:
+        patient_list = []
+
     else:
-        # Stationen aus dem Login-Dienst holen
-        allowed_stations = session.get("allowed_stations", [])
-
-        if not allowed_stations:
-            connection.close()
-            return redirect(url_for("login"))
-
-        placeholders = ",".join("?" for _ in allowed_stations)
+        placeholders = ",".join("?" for _ in station_ids)
 
         query = f"""
             SELECT patients.*, locations.station_number, locations.room_number,
-                   locations.bed_label, locations.admission_id
+                   locations.bed_label, locations.admission_id,
+                   (
+                     SELECT COUNT(*)
+                     FROM vital_signs
+                     WHERE vital_signs.patient_id = patients.id
+                       AND (
+                         vital_signs.pulse > 100
+                         OR vital_signs.temperature >= 38.0
+                         OR vital_signs.oxygen_saturation < 94
+                       )
+                   ) AS abnormal_vitals_count
             FROM patients
             JOIN current_patient_locations locations
               ON locations.patient_id = patients.id
-            WHERE locations.station_number IN ({placeholders})
+            WHERE locations.station_id IN ({placeholders})
         """
 
-        parameters = list(allowed_stations)
+        parameters = list(station_ids)
 
         if search_query:
             query += " AND patients.name LIKE ?"
@@ -874,8 +1166,7 @@ def patients():
     return render_template(
         "patients.html",
         patients=patient_list,
-        search_query=search_query,
-        heutiger_dienst=session.get("heutiger_dienst")
+        search_query=search_query
     )
 
 @app.route("/patient/<int:patient_id>", methods=["GET", "POST"])
@@ -892,10 +1183,24 @@ def patient_detail(patient_id):
     connection = get_db_connection()
 
     patient = connection.execute("""
-        SELECT patients.*, locations.station_number, locations.room_number,
-               locations.bed_label, locations.admission_id
+        SELECT
+            patients.*,
+            locations.station_number AS station,
+            locations.station_number,
+            locations.room_number,
+            locations.bed_label,
+            locations.admission_id,
+            (
+                SELECT diagnosis_text
+                FROM patient_diagnoses
+                WHERE patient_diagnoses.patient_id = patients.id
+                  AND patient_diagnoses.status = 'active'
+                ORDER BY diagnosed_at DESC
+                LIMIT 1
+            ) AS diagnosis
         FROM patients
-        LEFT JOIN current_patient_locations locations ON locations.patient_id = patients.id
+        LEFT JOIN current_patient_locations locations
+          ON locations.patient_id = patients.id
         WHERE patients.id = ?
     """, (patient_id,)).fetchone()
 
@@ -907,13 +1212,19 @@ def patient_detail(patient_id):
     access_reason = None
 
     if request.method == "POST":
-        access_reason = request.form.get("access_reason", "")
+        access_reason = normalize_access_reason(request.form.get("access_reason", ""))
 
         if access_reason not in ROLE_ACCESS_REASONS.get(session["role"], ()):
             connection.close()
             return "Ungültiger Zugriffsgrund.", 400
 
         unlock_patient_access(patient_id, access_reason)
+
+        next_url = request.form.get("next") or request.args.get("next")
+
+        if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+            connection.close()
+            return redirect(next_url)
 
         role = session["role"]
         username = session["username"]
@@ -928,20 +1239,41 @@ def patient_detail(patient_id):
         if has_permission(role, "diagnosis"):
             log_access(username, role, patient_id, patient["name"], "Diagnose", access_reason)
 
+    medications = connection.execute("""
+        SELECT
+            medication_plan.*,
+            medication_name AS name
+        FROM medication_plan
+        WHERE patient_id = ?
+        ORDER BY schedule_time
+    """, (patient_id,)).fetchall()
+
     nursing_notes = connection.execute("""
-        SELECT * FROM nursing_notes
+        SELECT
+            nursing_notes.*,
+            nurse_username AS created_by,
+            note_text AS note
+        FROM nursing_notes
         WHERE patient_id = ?
         ORDER BY created_at DESC
     """, (patient_id,)).fetchall()
 
     doctor_orders = connection.execute("""
-        SELECT * FROM doctor_orders
+        SELECT
+            doctor_orders.*,
+            'Ärztliche Anordnung' AS title,
+            order_text AS description
+        FROM doctor_orders
         WHERE patient_id = ?
         ORDER BY created_at DESC
     """, (patient_id,)).fetchall()
 
     lab_reports = connection.execute("""
-        SELECT * FROM lab_reports
+        SELECT
+            lab_reports.*,
+            test_name AS parameter,
+            result_value AS value
+        FROM lab_reports
         WHERE patient_id = ?
         ORDER BY created_at DESC
     """, (patient_id,)).fetchall()
@@ -959,6 +1291,91 @@ def patient_detail(patient_id):
         ORDER BY patient_diagnoses.status, patient_diagnoses.diagnosed_at DESC
     """, (patient_id,)).fetchall()
 
+    patient_warnings = connection.execute("""
+        SELECT * FROM patient_warnings
+        WHERE patient_id = ? AND is_active = 1
+        ORDER BY
+            CASE severity
+                WHEN 'critical' THEN 1
+                WHEN 'warning' THEN 2
+                ELSE 3
+            END,
+            created_at DESC
+    """, (patient_id,)).fetchall()
+
+    access_logs = []
+    try:
+        table_info = connection.execute("PRAGMA table_info(access_logs)").fetchall()
+        columns = [row["name"] for row in table_info]
+
+        if "patient_id" in columns:
+            reason_col = None
+            for col in ["reason", "access_reason", "begruendung"]:
+                if col in columns:
+                    reason_col = col
+                    break
+
+            time_col = None
+            for col in ["timestamp", "created_at", "accessed_at", "created_on", "time"]:
+                if col in columns:
+                    time_col = col
+                    break
+
+            reason_expr = f"access_logs.{reason_col}" if reason_col else "''"
+            time_expr = f"access_logs.{time_col}" if time_col else "''"
+            order_expr = f"access_logs.{time_col} DESC" if time_col else (
+                "access_logs.id DESC" if "id" in columns else "access_logs.rowid DESC"
+            )
+
+            access_logs = connection.execute(f"""
+                SELECT
+                    username,
+                    role,
+                    {reason_expr} AS reason,
+                    {time_expr} AS timestamp
+                FROM access_logs
+                WHERE patient_id = ?
+                ORDER BY {order_expr}
+            """, (patient_id,)).fetchall()
+    except sqlite3.OperationalError:
+        access_logs = []
+
+    access_unlocked = has_unlocked_patient_access(patient_id)
+    handover_notes = []
+    lab_files_by_report = {}
+    if not access_unlocked:
+        medications = []
+        nursing_notes = []
+        doctor_orders = []
+        lab_reports = []
+        diagnoses = []
+        access_logs = []
+        patient_warnings = []
+    else:
+        if session["role"] != "admin":
+            access_logs = []
+
+        if has_permission(session["role"], "handover.view"):
+            handover_notes = connection.execute("""
+                SELECT handover_notes.*, users.username
+                FROM handover_notes
+                JOIN users ON users.id = handover_notes.author_user_id
+                WHERE handover_notes.patient_id = ?
+                ORDER BY handover_notes.created_at DESC
+                LIMIT 8
+            """, (patient_id,)).fetchall()
+
+        if lab_reports:
+            lab_report_ids = [lab["id"] for lab in lab_reports]
+            placeholders = ",".join("?" for _ in lab_report_ids)
+            lab_files = connection.execute(f"""
+                SELECT * FROM lab_report_files
+                WHERE lab_report_id IN ({placeholders})
+                ORDER BY uploaded_at DESC
+            """, lab_report_ids).fetchall()
+            for file in lab_files:
+                lab_files_by_report.setdefault(file["lab_report_id"], []).append(file)
+
     connection.close()
 
     return render_template(
@@ -966,13 +1383,150 @@ def patient_detail(patient_id):
         patient=patient,
         visible_data=visible_data,
         access_reason=access_reason,
+        medications=medications,
         nursing_notes=nursing_notes,
         doctor_orders=doctor_orders,
         lab_reports=lab_reports,
+        lab_files_by_report=lab_files_by_report,
         diagnoses=diagnoses,
+        patient_warnings=patient_warnings,
+        access_logs=access_logs,
+        handover_notes=handover_notes,
         role=session["role"],
+        access_unlocked=access_unlocked,
+        show_access_logs=session["role"] == "admin",
         allowed_access_reasons=ROLE_ACCESS_REASONS.get(session["role"], ()),
     )
+@app.route("/patient/<int:patient_id>/arztbrief", methods=["GET", "POST"])
+def arztbrief(patient_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if not is_doctor_role(session.get("role")):
+        abort(403)
+
+    access_check = require_patient_access(patient_id)
+    if access_check:
+        return access_check
+
+    connection = get_db_connection()
+
+    patient = connection.execute("""
+        SELECT * FROM patients
+        WHERE id = ?
+    """, (patient_id,)).fetchone()
+
+    if not patient:
+        connection.close()
+        abort(404)
+
+    if request.method == "POST":
+        title = request.form.get("title", "Arztbrief").strip()
+        content = request.form.get("arztbrief_content", "").strip()
+
+        if not content:
+            connection.close()
+            return "Der Arztbrief darf nicht leer sein.", 400
+
+        connection.execute("""
+            INSERT INTO doctor_letters (
+                patient_id, author_user_id, title, content
+            )
+            VALUES (?, ?, ?, ?)
+        """, (patient_id, get_session_user_id(), title, content))
+
+        connection.execute("""
+            DELETE FROM drafts
+            WHERE user_id = ? AND patient_id = ? AND draft_type = ?
+        """, (get_session_user_id(), patient_id, "arztbrief"))
+
+        connection.commit()
+        connection.close()
+
+        audit_patient_access(patient, "Arztbrief", "create")
+
+        return redirect(url_for("patient_detail", patient_id=patient_id))
+
+    draft = connection.execute("""
+        SELECT content FROM drafts
+        WHERE user_id = ? AND patient_id = ? AND draft_type = ?
+    """, (get_session_user_id(), patient_id, "arztbrief")).fetchone()
+
+    draft_content = draft["content"] if draft else ""
+
+    connection.close()
+
+    return render_template(
+        "arztbrief.html",
+        patient=patient,
+        draft_content=draft_content
+    )
+
+
+@app.route("/autosave_draft", methods=["POST"])
+def autosave_draft():
+    if "username" not in session:
+        return {"success": False, "message": "Nicht eingeloggt"}, 401
+
+    user_id = session.get("user_id")
+    patient_id = request.form.get("patient_id")
+    draft_type = request.form.get("draft_type")
+    content = request.form.get("content", "")
+
+    if not draft_type:
+        return {"success": False, "message": "Draft-Typ fehlt"}, 400
+
+    connection = get_db_connection()
+
+    connection.execute("""
+        INSERT INTO drafts (user_id, patient_id, draft_type, content, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, patient_id, draft_type) DO UPDATE SET
+            content = excluded.content,
+            updated_at = CURRENT_TIMESTAMP
+    """, (user_id, patient_id, draft_type, content))
+
+    connection.commit()
+    connection.close()
+
+    return {"success": True}
+
+
+@app.route("/doctor_drafts")
+def doctor_drafts():
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if not is_doctor_role(session.get("role")):
+        abort(403)
+
+    connection = get_db_connection()
+    station_ids = get_accessible_station_ids()
+    drafts = []
+
+    if station_ids:
+        placeholders = ",".join("?" for _ in station_ids)
+        drafts = connection.execute(f"""
+            SELECT
+                drafts.*,
+                patients.name AS patient_name,
+                patients.birthdate,
+                locations.station_number,
+                locations.room_number,
+                locations.bed_label
+            FROM drafts
+            JOIN patients ON patients.id = drafts.patient_id
+            JOIN current_patient_locations locations
+              ON locations.patient_id = patients.id
+            WHERE drafts.user_id = ?
+              AND drafts.draft_type = 'arztbrief'
+              AND locations.station_id IN ({placeholders})
+            ORDER BY drafts.updated_at DESC
+        """, [get_session_user_id(), *station_ids]).fetchall()
+
+    connection.close()
+
+    return render_template("doctor_drafts.html", drafts=drafts)
 
 
 @app.route("/add_diagnosis/<int:patient_id>", methods=["POST"])
@@ -1060,50 +1614,121 @@ def logs():
     if not has_permission(session["role"], "logs.view"):
         abort(403)
 
-    search_query = request.args.get("search", "")
-    role_filter = request.args.get("role", "")
+    username_filter = request.args.get("username", "").strip()
+    role_filter = request.args.get("role", "").strip()
+    patient_filter = request.args.get("patient", "").strip()
+    reason_filter = request.args.get("reason", "").strip()
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
 
     connection = get_db_connection()
 
-    query = """
-        SELECT * FROM access_logs
+    # Echte Spalten der Tabelle access_logs auslesen
+    table_info = connection.execute("PRAGMA table_info(access_logs)").fetchall()
+    columns = [row["name"] for row in table_info]
+
+    # Mögliche Spalten automatisch erkennen
+    id_expr = "access_logs.id" if "id" in columns else "access_logs.rowid"
+
+    username_col = None
+    for col in ["username", "user_name", "user"]:
+        if col in columns:
+            username_col = col
+            break
+
+    role_col = None
+    for col in ["role", "user_role"]:
+        if col in columns:
+            role_col = col
+            break
+
+    reason_col = None
+    for col in ["reason", "access_reason", "begruendung"]:
+        if col in columns:
+            reason_col = col
+            break
+
+    time_col = None
+    for col in ["timestamp", "created_at", "accessed_at", "created_on", "time"]:
+        if col in columns:
+            time_col = col
+            break
+
+    username_expr = f"access_logs.{username_col}" if username_col else "''"
+    role_expr = f"access_logs.{role_col}" if role_col else "''"
+    reason_expr = f"access_logs.{reason_col}" if reason_col else "''"
+    time_expr = f"access_logs.{time_col}" if time_col else "''"
+
+    # Patient entweder über patient_id joinen oder direkt patient_name nutzen
+    patient_join = ""
+    patient_expr = "''"
+
+    if "patient_id" in columns:
+        patient_join = "LEFT JOIN patients ON access_logs.patient_id = patients.id"
+        patient_expr = "patients.name"
+    elif "patient_name" in columns:
+        patient_expr = "access_logs.patient_name"
+
+    query = f"""
+        SELECT
+            {id_expr} AS id,
+            {username_expr} AS username,
+            {role_expr} AS role,
+            {patient_expr} AS patient_name,
+            {reason_expr} AS reason,
+            {time_expr} AS timestamp
+        FROM access_logs
+        {patient_join}
         WHERE 1 = 1
     """
 
     parameters = []
 
-    if search_query:
-        query += """
-            AND (
-                username LIKE ?
-                OR patient_name LIKE ?
-                OR accessed_data LIKE ?
-                OR access_reason LIKE ?
-                OR action LIKE ?
-            )
-        """
-        parameters.extend([
-            f"%{search_query}%",
-            f"%{search_query}%",
-            f"%{search_query}%",
-            f"%{search_query}%",
-            f"%{search_query}%"
-        ])
+    if username_filter and username_col:
+        query += f" AND access_logs.{username_col} LIKE ?"
+        parameters.append(f"%{username_filter}%")
 
-    if role_filter:
-        query += " AND role = ?"
+    if role_filter and role_col:
+        query += f" AND access_logs.{role_col} = ?"
         parameters.append(role_filter)
 
-    query += " ORDER BY access_time DESC"
+    if patient_filter:
+        if "patient_id" in columns:
+            query += " AND patients.name LIKE ?"
+            parameters.append(f"%{patient_filter}%")
+        elif "patient_name" in columns:
+            query += " AND access_logs.patient_name LIKE ?"
+            parameters.append(f"%{patient_filter}%")
 
-    log_list = connection.execute(query, parameters).fetchall()
+    if reason_filter and reason_col:
+        query += f" AND access_logs.{reason_col} LIKE ?"
+        parameters.append(f"%{reason_filter}%")
+
+    if date_from and time_col:
+        query += f" AND DATE(access_logs.{time_col}) >= ?"
+        parameters.append(date_from)
+
+    if date_to and time_col:
+        query += f" AND DATE(access_logs.{time_col}) <= ?"
+        parameters.append(date_to)
+
+    if time_col:
+        query += f" ORDER BY access_logs.{time_col} DESC"
+    else:
+        query += " ORDER BY id DESC"
+
+    logs_list = connection.execute(query, parameters).fetchall()
     connection.close()
 
     return render_template(
         "logs.html",
-        logs=log_list,
-        search_query=search_query,
-        role_filter=role_filter
+        logs=logs_list,
+        username_filter=username_filter,
+        role_filter=role_filter,
+        patient_filter=patient_filter,
+        reason_filter=reason_filter,
+        date_from=date_from,
+        date_to=date_to
     )
 
 
@@ -1142,6 +1767,8 @@ def add_user():
         connection.close()
 
     return render_template("add_user.html", message=message)
+
+
 
 
 @app.route("/users")
@@ -1187,10 +1814,6 @@ def set_shift():
     if session.get("role") not in SHIFT_ROLES:
         abort(403)
 
-    existing_shift = get_today_shift()
-    if existing_shift:
-        return redirect(url_for("dashboard"))
-
     shift_type = request.form.get("shift_type", "")
 
     if shift_type not in {"Tagdienst", "Spätdienst", "Nachtdienst"}:
@@ -1200,6 +1823,9 @@ def set_shift():
     connection.execute("""
         INSERT INTO duty_shifts (user_id, duty_date, shift_type)
         VALUES (?, ?, ?)
+        ON CONFLICT(user_id, duty_date) DO UPDATE SET
+            shift_type = excluded.shift_type,
+            updated_at = CURRENT_TIMESTAMP
     """, (get_session_user_id(), date.today().isoformat(), shift_type))
     connection.commit()
     connection.close()
@@ -1232,12 +1858,15 @@ def handover():
         return render_template(
             "handover.html", stations=[], patients=[], selected_station_id=None,
             unlocked=False, current_shift=None,
+            handover_summary={"patient_count": 0, "alert_count": 0, "note_count": 0},
+            notes_by_patient={},
+            alerts_by_patient={},
         )
 
     grant = session.get(f"handover_access_{selected_station_id}", {})
     unlocked = (
         isinstance(grant, dict)
-        and grant.get("reason") == "Übergabe"
+        and normalize_access_reason(grant.get("reason")) == "Übergabe"
         and datetime.now(timezone.utc).timestamp() - grant.get("granted_at", 0)
         <= PATIENT_ACCESS_TTL_SECONDS
     )
@@ -1245,6 +1874,11 @@ def handover():
     patients = []
     notes_by_patient = {}
     alerts_by_patient = {}
+    handover_summary = {
+        "patient_count": 0,
+        "alert_count": 0,
+        "note_count": 0,
+    }
     if unlocked:
         patients = connection.execute("""
             SELECT patients.*, locations.room_number, locations.station_number,
@@ -1287,6 +1921,21 @@ def handover():
             for alert in alert_rows:
                 alerts_by_patient.setdefault(alert["patient_id"], []).append(alert)
 
+        patients = sorted(
+            patients,
+            key=lambda patient: (
+                0 if alerts_by_patient.get(patient["id"]) else 1,
+                patient["room_number"] or "",
+                patient["bed_label"] or "",
+                patient["name"],
+            )
+        )
+        handover_summary = {
+            "patient_count": len(patients),
+            "alert_count": sum(1 for patient in patients if alerts_by_patient.get(patient["id"])),
+            "note_count": sum(len(notes_by_patient.get(patient["id"], [])) for patient in patients),
+        }
+
     current_shift_row = connection.execute("""
         SELECT shift_type FROM duty_shifts
         WHERE user_id = ? AND duty_date = ?
@@ -1302,6 +1951,7 @@ def handover():
         current_shift=current_shift_row["shift_type"] if current_shift_row else None,
         notes_by_patient=notes_by_patient,
         alerts_by_patient=alerts_by_patient,
+        handover_summary=handover_summary,
     )
 
 
@@ -1316,7 +1966,7 @@ def unlock_handover():
     if station_id not in get_accessible_station_ids():
         abort(403)
 
-    reason = request.form.get("access_reason", "")
+    reason = normalize_access_reason(request.form.get("access_reason", ""))
     if reason != "Übergabe" or reason not in ROLE_ACCESS_REASONS.get(session["role"], ()):
         return "Ungültiger Zugriffsgrund.", 400
 
@@ -1729,6 +2379,7 @@ def patient_location(patient_id):
     )
 
 
+@app.route("/patients/<int:patient_id>/nursing-note", methods=["GET", "POST"])
 @app.route("/add_nursing_note/<int:patient_id>", methods=["GET", "POST"])
 def add_nursing_note(patient_id):
     if "username" not in session:
@@ -1778,6 +2429,7 @@ def add_nursing_note(patient_id):
     )
 
 
+@app.route("/patients/<int:patient_id>/doctor-order", methods=["GET", "POST"])
 @app.route("/add_doctor_order/<int:patient_id>", methods=["GET", "POST"])
 def add_doctor_order(patient_id):
     if "username" not in session:
@@ -1826,6 +2478,7 @@ def add_doctor_order(patient_id):
     )
 
 
+@app.route("/patients/<int:patient_id>/curve", methods=["GET", "POST"])
 @app.route("/patient_curve/<int:patient_id>", methods=["GET", "POST"])
 def patient_curve(patient_id):
     if "username" not in session:
@@ -1838,7 +2491,7 @@ def patient_curve(patient_id):
     if not has_permission(session["role"], "vitals.view"):
         abort(403)
 
-    selected_date = request.args.get("date", "2026-04-27")
+    selected_date = request.args.get("date")
     message = None
 
     connection = get_db_connection()
@@ -1850,6 +2503,14 @@ def patient_curve(patient_id):
     if patient is None:
         connection.close()
         return "Patient wurde nicht gefunden."
+
+    if not selected_date:
+        latest_vital_date = connection.execute("""
+            SELECT MAX(record_date) AS latest_date
+            FROM vital_signs
+            WHERE patient_id = ?
+        """, (patient_id,)).fetchone()
+        selected_date = latest_vital_date["latest_date"] if latest_vital_date and latest_vital_date["latest_date"] else date.today().isoformat()
 
     if request.method == "GET":
         audit_patient_access(patient, "Patientenkurve")
@@ -1960,6 +2621,39 @@ def patient_curve(patient_id):
         "max_temperature": max(temperature_values) if temperature_values else "-",
         "min_spo2": min(spo2_values) if spo2_values else "-"
     }
+
+    critical_count = 0
+    for row in curve_rows:
+        vital = row["data"]
+        row["status_class"] = "stable" if row["status"] == "normal" else "warning"
+        row["status_label"] = "Stabil" if row["status"] == "normal" else "Kontrolle"
+        row["warning_score"] = 0 if row["status"] == "normal" else max(1, len(row["alerts"].split(",")))
+
+        blood_pressure = vital["blood_pressure"] or ""
+        row["systolic"] = "-"
+        row["diastolic"] = "-"
+        if "/" in blood_pressure:
+            systolic_text, diastolic_text = blood_pressure.split("/", 1)
+            try:
+                row["systolic"] = int(systolic_text.strip())
+                row["diastolic"] = int(diastolic_text.strip())
+                if row["systolic"] >= 180 or row["systolic"] < 90:
+                    row["status_class"] = "critical"
+                    row["status_label"] = "Kritisch"
+                    row["warning_score"] += 2
+                    critical_count += 1
+            except ValueError:
+                pass
+
+        if vital["oxygen_saturation"] is not None and vital["oxygen_saturation"] != "":
+            if int(vital["oxygen_saturation"]) < 90 and row["status_class"] != "critical":
+                row["status_class"] = "critical"
+                row["status_label"] = "Kritisch"
+                row["warning_score"] += 2
+                critical_count += 1
+
+    summary["critical_count"] = critical_count
+    summary["overall_status"] = "Kritisch" if critical_count else ("Kontrolle nötig" if abnormal_count else "Stabil")
 
     chart_labels = []
     chart_pulse = []
@@ -2074,6 +2768,65 @@ def add_order_from_curve(patient_id):
     return redirect(url_for("patient_detail", patient_id=patient_id))
 
 
+@app.route("/add_lab_request/<int:patient_id>", methods=["POST"])
+def add_lab_request(patient_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if not has_permission(session["role"], "lab_requests.create"):
+        abort(403)
+
+    access_check = require_patient_access(patient_id)
+    if access_check:
+        return access_check
+
+    request_type = request.form.get("request_type", "Laborwert").strip()
+    test_name = request.form.get("test_name", "").strip()
+    priority = request.form.get("priority", "normal").strip()
+    clinical_question = request.form.get("clinical_question", "").strip()
+
+    if not test_name:
+        return "Untersuchung ist erforderlich.", 400
+
+    if request_type not in {"Laborwert", "Mikrobiologie", "Bildgebung", "Pathologie"}:
+        return "Ungültige Anforderungsart.", 400
+
+    if priority not in {"normal", "dringend", "kritisch"}:
+        return "Ungültige Priorität.", 400
+
+    connection = get_db_connection()
+    patient = connection.execute(
+        "SELECT * FROM patients WHERE id = ?", (patient_id,)
+    ).fetchone()
+    if not patient:
+        connection.close()
+        abort(404)
+
+    connection.execute("""
+        INSERT INTO lab_requests (
+            patient_id,
+            requested_by_user_id,
+            request_type,
+            test_name,
+            priority,
+            clinical_question
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        patient_id,
+        get_session_user_id(),
+        request_type,
+        test_name,
+        priority,
+        clinical_question,
+    ))
+
+    connection.commit()
+    connection.close()
+    audit_patient_access(patient, "Laboranforderung", "create")
+    return redirect(url_for("patient_detail", patient_id=patient_id))
+
+
 @app.route("/notify_doctor/<int:patient_id>", methods=["POST"])
 def notify_doctor(patient_id):
     if "username" not in session:
@@ -2145,6 +2898,7 @@ def close_notification(notification_id):
     return redirect(url_for("dashboard"))
 
 
+@app.route("/patients/<int:patient_id>/medications")
 @app.route("/medication_plan/<int:patient_id>")
 def medication_plan(patient_id):
     if "username" not in session:
@@ -2175,12 +2929,25 @@ def medication_plan(patient_id):
         ORDER BY schedule_time
     """, (patient_id,)).fetchall()
 
+    patient_warnings = connection.execute("""
+        SELECT * FROM patient_warnings
+        WHERE patient_id = ? AND is_active = 1
+        ORDER BY
+            CASE severity
+                WHEN 'critical' THEN 1
+                WHEN 'warning' THEN 2
+                ELSE 3
+            END,
+            created_at DESC
+    """, (patient_id,)).fetchall()
+
     connection.close()
 
     return render_template(
         "medication_plan.html",
         patient=patient,
         medications=medications,
+        patient_warnings=patient_warnings,
         role=session["role"]
     )
 
@@ -2309,6 +3076,73 @@ def administer_medication(medication_id):
     return redirect(url_for("medication_plan", patient_id=patient_id))
 
 
+@app.route("/pause_medication/<int:medication_id>", methods=["POST"])
+def pause_medication(medication_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if not has_permission(session["role"], "medication.create"):
+        abort(403)
+
+    connection = get_db_connection()
+    medication = connection.execute(
+        "SELECT * FROM medication_plan WHERE id = ?", (medication_id,)
+    ).fetchone()
+    if not medication:
+        connection.close()
+        abort(404)
+
+    access_check = require_patient_access(medication["patient_id"])
+    if access_check:
+        connection.close()
+        return access_check
+
+    connection.execute("""
+        UPDATE medication_plan
+        SET status = 'pausiert',
+            paused_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    """, (medication_id,))
+    connection.commit()
+    connection.close()
+    return redirect(url_for("medication_plan", patient_id=medication["patient_id"]))
+
+
+@app.route("/stop_medication/<int:medication_id>", methods=["POST"])
+def stop_medication(medication_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if not has_permission(session["role"], "medication.create"):
+        abort(403)
+
+    stop_reason = request.form.get("stop_reason", "").strip()
+    connection = get_db_connection()
+    medication = connection.execute(
+        "SELECT * FROM medication_plan WHERE id = ?", (medication_id,)
+    ).fetchone()
+    if not medication:
+        connection.close()
+        abort(404)
+
+    access_check = require_patient_access(medication["patient_id"])
+    if access_check:
+        connection.close()
+        return access_check
+
+    connection.execute("""
+        UPDATE medication_plan
+        SET status = 'abgesetzt',
+            stopped_at = CURRENT_TIMESTAMP,
+            stopped_by = ?,
+            stop_reason = ?
+        WHERE id = ?
+    """, (session["username"], stop_reason, medication_id))
+    connection.commit()
+    connection.close()
+    return redirect(url_for("medication_plan", patient_id=medication["patient_id"]))
+
+
 @app.route("/nursing_tasks")
 def nursing_tasks():
     if "username" not in session:
@@ -2361,17 +3195,18 @@ def nursing_tasks():
     )
 
 
+@app.route("/patients/<int:patient_id>/lab-report", methods=["GET", "POST"])
 @app.route("/add_lab_report/<int:patient_id>", methods=["GET", "POST"])
 def add_lab_report(patient_id):
     if "username" not in session:
         return redirect(url_for("login"))
 
+    if not has_permission(session["role"], "lab.create"):
+        abort(403)
+
     access_check = require_patient_access(patient_id)
     if access_check:
         return access_check
-
-    if not has_permission(session["role"], "lab.create"):
-        abort(403)
 
     connection = get_db_connection()
 
@@ -2387,31 +3222,125 @@ def add_lab_report(patient_id):
         audit_patient_access(patient, "Laborbefunde")
 
     message = None
+    open_lab_requests = connection.execute("""
+        SELECT lab_requests.*, users.username AS requested_by
+        FROM lab_requests
+        JOIN users ON users.id = lab_requests.requested_by_user_id
+        WHERE lab_requests.patient_id = ?
+          AND lab_requests.status IN ('offen', 'in Arbeit')
+        ORDER BY
+            CASE lab_requests.priority
+                WHEN 'kritisch' THEN 1
+                WHEN 'dringend' THEN 2
+                ELSE 3
+            END,
+            lab_requests.created_at DESC
+    """, (patient_id,)).fetchall()
 
     if request.method == "POST":
-        test_name = request.form["test_name"]
-        result_value = request.form["result_value"]
-        reference_range = request.form["reference_range"]
-        interpretation = request.form["interpretation"]
+        lab_request_id = request.form.get("lab_request_id", type=int)
+        report_type = request.form.get("report_type", "Laborwert").strip()
+        test_name = request.form.get("test_name", "").strip()
+        sample_material = request.form.get("sample_material", "").strip()
+        result_value = request.form.get("result_value", "").strip()
+        result_unit = request.form.get("result_unit", "").strip()
+        reference_range = request.form.get("reference_range", "").strip()
+        interpretation = request.form.get("interpretation", "").strip()
+        collected_at = request.form.get("collected_at", "").strip()
+        status = request.form.get("status", "final").strip()
+        notes = request.form.get("notes", "").strip()
+        file_description = request.form.get("file_description", "").strip()
 
-        connection.execute("""
+        if not test_name or not result_value:
+            connection.close()
+            return "Untersuchung und Ergebnis sind Pflichtfelder.", 400
+
+        if report_type not in {"Laborwert", "Mikrobiologie", "Bildgebung", "Pathologie", "Sonstiger Befund"}:
+            connection.close()
+            return "Ungültige Befundart.", 400
+
+        if status not in {"angefordert", "vorläufig", "final", "kritisch"}:
+            connection.close()
+            return "Ungültiger Befundstatus.", 400
+
+        cursor = connection.execute("""
             INSERT INTO lab_reports (
                 patient_id,
                 lab_username,
+                report_type,
                 test_name,
+                sample_material,
                 result_value,
+                result_unit,
                 reference_range,
-                interpretation
+                interpretation,
+                collected_at,
+                status,
+                notes
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             patient_id,
             session["username"],
+            report_type,
             test_name,
+            sample_material,
             result_value,
+            result_unit,
             reference_range,
-            interpretation
+            interpretation,
+            collected_at,
+            status,
+            notes
         ))
+
+        lab_report_id = cursor.lastrowid
+        uploaded_files = request.files.getlist("attachments")
+        for uploaded_file in uploaded_files:
+            if not uploaded_file or not uploaded_file.filename:
+                continue
+            saved_file = save_lab_file(uploaded_file)
+            if not saved_file:
+                connection.close()
+                return "Nur PNG, JPG, JPEG, WEBP oder GIF Dateien sind erlaubt.", 400
+            stored_filename, original_filename, extension = saved_file
+            connection.execute("""
+                INSERT INTO lab_report_files (
+                    lab_report_id,
+                    filename,
+                    original_filename,
+                    file_type,
+                    description,
+                    uploaded_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                lab_report_id,
+                stored_filename,
+                original_filename,
+                extension,
+                file_description,
+                session["username"],
+            ))
+
+        if lab_request_id:
+            connection.execute("""
+                UPDATE lab_requests
+                SET status = 'erledigt',
+                    completed_at = CURRENT_TIMESTAMP,
+                    completed_by = ?
+                WHERE id = ? AND patient_id = ?
+            """, (session["username"], lab_request_id, patient_id))
+
+        if status == "kritisch":
+            connection.execute("""
+                INSERT INTO doctor_notifications (patient_id, sent_by, message)
+                VALUES (?, ?, ?)
+            """, (
+                patient_id,
+                session["username"],
+                f"Kritischer Befund: {test_name} - {result_value} {result_unit}".strip(),
+            ))
 
         connection.commit()
         audit_patient_access(patient, "Laborbefunde", "create")
@@ -2422,7 +3351,8 @@ def add_lab_report(patient_id):
     return render_template(
         "add_lab_report.html",
         patient=patient,
-        message=message
+        message=message,
+        open_lab_requests=open_lab_requests,
     )
 
 

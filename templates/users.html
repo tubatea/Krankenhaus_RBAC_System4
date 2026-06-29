@@ -40,7 +40,7 @@
                     <form method="POST" action="{{ url_for('change_role', user_id=user['id']) }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <select name="role" aria-label="Rolle für {{ user['username'] }}">
-                            {% for value, label in [('assistenzarzt', 'Assistenzarzt / Assistenzärztin'), ('oberarzt', 'Oberarzt / Oberärztin'), ('chefarzt', 'Chefarzt / Chefärztin'), ('nurse', 'Pflegekraft'), ('lab', 'Labor'), ('admin', 'Administration')] %}
+                            {% for value, label in [('assistenzarzt', 'Assistenzarzt / Assistenzärztin'), ('oberarzt', 'Oberarzt / Oberärztin'), ('chefarzt', 'Chefarzt / Chefärztin'), ('nurse_48', 'Pflegekraft Station 48'), ('nurse_49', 'Pflegekraft Station 49'), ('lab', 'Labor'), ('admin', 'Administration')] %}
                                 <option value="{{ value }}" {% if user["role"] == value %}selected{% endif %}>{{ label }}</option>
                             {% endfor %}
                         </select>
@@ -55,7 +55,7 @@
                     {% endif %}
                 </td>
                 <td>
-                    {% if user["role"] in ["assistenzarzt", "oberarzt", "nurse", "lab"] %}
+                    {% if user["role"] in ["assistenzarzt", "oberarzt", "lab"] %}
                         <form method="POST" action="{{ url_for('assign_user_stations', user_id=user['id']) }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             {% for station in stations %}
@@ -67,6 +67,10 @@
                             {% endfor %}
                             <button type="submit">Stationen speichern</button>
                         </form>
+                    {% elif user["role"] == "nurse_48" %}
+                        <p><span class="badge">Nur Station 48</span></p>
+                    {% elif user["role"] == "nurse_49" %}
+                        <p><span class="badge">Nur Station 49</span></p>
                     {% elif user["role"] == "chefarzt" %}
                         <p><span class="badge">Alle Stationen</span></p>
                     {% endif %}

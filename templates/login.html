@@ -15,19 +15,14 @@
         <p class="error">{{ error }}</p>
     {% endif %}
 
-   <form method="POST">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-    <label>Benutzername</label>
-    <input type="text" name="username" required>
+        <label>Benutzername</label>
+        <input type="text" name="username" required>
 
-    <label>Passwort</label>
-    <input type="password" name="password" required>
-
-    <button type="submit">Einloggen</button>
-</form>
-    </select>
-</div>
+        <label>Passwort</label>
+        <input type="password" name="password" required>
 
         <button type="submit">Einloggen</button>
     </form>
@@ -36,6 +31,7 @@
         <p><strong>Test-Logins:</strong></p>
         <p>arzt / 1234</p>
         <p>pflege / 1234</p>
+        <p>pflege49 / 1234</p>
         <p>labor / 1234</p>
         <p>admin / 1234</p>
     </div>

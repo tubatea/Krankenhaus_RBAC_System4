@@ -45,7 +45,7 @@
     </section>
 
     <!-- Heutiger Dienst: NUR Anzeige, kein Formular -->
-    {% if role in ["assistenzarzt", "oberarzt", "chefarzt", "nurse"] %}
+    {% if is_doctor_role(role) or is_nurse_role(role) %}
         <section class="dashboard-section">
             <div class="section-heading">
                 <div>
@@ -107,7 +107,7 @@
                 </div>
             </div>
 
-            {% if role in ["assistenzarzt", "oberarzt", "chefarzt", "nurse"] %}
+            {% if is_doctor_role(role) or is_nurse_role(role) %}
                 <div class="kpi-card">
                     <div class="kpi-icon purple">A</div>
                     <div>
@@ -118,7 +118,7 @@
                 </div>
             {% endif %}
 
-            {% if role == "nurse" %}
+            {% if is_nurse_role(role) %}
                 <div class="kpi-card">
                     <div class="kpi-icon green">M</div>
                     <div>
@@ -138,6 +138,14 @@
                         <p>Offene Hinweise aus dem Pflegebereich</p>
                     </div>
                 </div>
+            {% endif %}
+
+            {% if is_doctor %}
+                <a class="quick-action" href="{{ url_for('doctor_drafts') }}">
+                    <span>Arztbrief</span>
+                    <strong>Meine Entwürfe</strong>
+                    <p>Gespeicherte Arztbrief-Entwürfe weiterbearbeiten</p>
+                </a>
             {% endif %}
 
             {% if role == "admin" %}
@@ -162,6 +170,151 @@
 
         </div>
     </section>
+
+    {% if is_doctor or is_nurse_role(role) or role == "lab" %}
+        <section class="dashboard-section">
+            <div class="section-heading">
+                <div>
+                    <h2>Aufgaben & Prioritäten</h2>
+                    <p>Was heute zuerst Aufmerksamkeit braucht.</p>
+                </div>
+            </div>
+
+            <div class="task-board">
+                <article class="task-panel priority">
+                    <div class="task-panel-header">
+                        <span class="task-icon">!</span>
+                        <div>
+                            <h3>Auffällige Patienten</h3>
+                            <p>Automatisch aus Vitalwerten erkannt</p>
+                        </div>
+                    </div>
+
+                    {% if urgent_patients %}
+                        <div class="task-list">
+                            {% for patient in urgent_patients %}
+                                <a class="task-item" href="{{ url_for('patient_curve', patient_id=patient['id']) }}">
+                                    <div>
+                                        <strong>{{ patient["name"] }}</strong>
+                                        <span>Station {{ patient["station_number"] }} · Zimmer {{ patient["room_number"] }} · {{ patient["record_time"] }}</span>
+                                    </div>
+                                    <small>Puls {{ patient["pulse"] or "–" }} · Temp {{ patient["temperature"] or "–" }} · SpO₂ {{ patient["oxygen_saturation"] or "–" }}</small>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="empty-card compact">Keine auffälligen Vitalwerte im sichtbaren Bereich.</div>
+                    {% endif %}
+                </article>
+
+                {% if is_nurse_role(role) %}
+                    <article class="task-panel">
+                        <div class="task-panel-header">
+                            <span class="task-icon">M</span>
+                            <div>
+                                <h3>Pflegeaufgaben</h3>
+                                <p>Medikamente und offene Anordnungen</p>
+                            </div>
+                        </div>
+
+                        <div class="task-list">
+                            {% for medication in nurse_medication_tasks %}
+                                <a class="task-item" href="{{ url_for('medication_plan', patient_id=medication['patient_id']) }}">
+                                    <div>
+                                        <strong>{{ medication["patient_name"] }}</strong>
+                                        <span>{{ medication["medication_name"] }} · {{ medication["schedule_time"] }}</span>
+                                    </div>
+                                    <small>Medikation offen</small>
+                                </a>
+                            {% endfor %}
+
+                            {% for order in nurse_order_tasks %}
+                                <a class="task-item" href="{{ url_for('patient_detail', patient_id=order['patient_id']) }}">
+                                    <div>
+                                        <strong>{{ order["patient_name"] }}</strong>
+                                        <span>{{ order["order_text"][:90] }}{% if order["order_text"]|length > 90 %}...{% endif %}</span>
+                                    </div>
+                                    <small>Anordnung offen</small>
+                                </a>
+                            {% endfor %}
+
+                            {% if not nurse_medication_tasks and not nurse_order_tasks %}
+                                <div class="empty-card compact">Keine offenen Pflegeaufgaben.</div>
+                            {% endif %}
+                        </div>
+                    </article>
+                {% endif %}
+
+                {% if is_doctor %}
+                    <article class="task-panel">
+                        <div class="task-panel-header">
+                            <span class="task-icon">D</span>
+                            <div>
+                                <h3>Ärztliche Arbeit</h3>
+                                <p>Labor, Entwürfe und offene Hinweise</p>
+                            </div>
+                        </div>
+
+                        <div class="task-list">
+                            {% for lab in critical_lab_reports %}
+                                <a class="task-item urgent" href="{{ url_for('patient_detail', patient_id=lab['patient_id']) }}">
+                                    <div>
+                                        <strong>Kritisch: {{ lab["patient_name"] }}</strong>
+                                        <span>{{ lab["test_name"] }}: {{ lab["result_value"] }}</span>
+                                    </div>
+                                    <small>Kritischer Befund</small>
+                                </a>
+                            {% endfor %}
+
+                            <a class="task-item" href="{{ url_for('doctor_drafts') }}">
+                                <div>
+                                    <strong>Arztbrief-Entwürfe</strong>
+                                    <span>{{ draft_count }} gespeicherte Entwürfe</span>
+                                </div>
+                                <small>Weiterbearbeiten</small>
+                            </a>
+
+                            {% for lab in latest_lab_reports %}
+                                <a class="task-item" href="{{ url_for('patient_detail', patient_id=lab['patient_id']) }}">
+                                    <div>
+                                        <strong>{{ lab["patient_name"] }}</strong>
+                                        <span>{{ lab["test_name"] }}: {{ lab["result_value"] }}</span>
+                                    </div>
+                                    <small>Laborbefund</small>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </article>
+                {% endif %}
+
+                {% if role == "lab" %}
+                    <article class="task-panel">
+                        <div class="task-panel-header">
+                            <span class="task-icon">L</span>
+                            <div>
+                                <h3>Labor-Arbeitsliste</h3>
+                                <p>Offene Anforderungen aus den Stationen</p>
+                            </div>
+                        </div>
+
+                        <div class="task-list">
+                            {% for request in pending_lab_requests %}
+                                <a class="task-item {% if request['priority'] == 'kritisch' %}urgent{% endif %}" href="{{ url_for('add_lab_report', patient_id=request['patient_id']) }}">
+                                    <div>
+                                        <strong>{{ request["patient_name"] }}</strong>
+                                        <span>{{ request["request_type"] }} · {{ request["test_name"] }}</span>
+                                    </div>
+                                    <small>{{ request["priority"] }}</small>
+                                </a>
+                            {% else %}
+                                <div class="empty-card compact">Keine offenen Laboranforderungen.</div>
+                            {% endfor %}
+                        </div>
+                    </article>
+                {% endif %}
+            </div>
+        </section>
+    {% endif %}
 
     <!-- Arzt-Benachrichtigungen -->
     {% if is_doctor %}
@@ -213,7 +366,7 @@
 
         <div class="quick-action-grid">
 
-            {% if role in ["assistenzarzt", "oberarzt", "chefarzt", "nurse", "lab", "admin"] %}
+            {% if is_doctor_role(role) or is_nurse_role(role) or role in ["lab", "admin"] %}
                 <a class="quick-action" href="{{ url_for('patients') }}">
                     <span>Patienten</span>
                     <strong>Patienten anzeigen</strong>
@@ -221,7 +374,7 @@
                 </a>
             {% endif %}
 
-            {% if role in ["assistenzarzt", "oberarzt", "chefarzt", "nurse"] %}
+            {% if is_doctor_role(role) or is_nurse_role(role) %}
                 <a class="quick-action" href="{{ url_for('handover') }}">
                     <span>Übergabe</span>
                     <strong>Übergabe öffnen</strong>

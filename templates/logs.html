@@ -2,8 +2,8 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Zugriffsprotokolle</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Zugriffsprotokoll | Krankenhaus-RBAC-System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=60">
 </head>
 <body>
 
@@ -11,88 +11,174 @@
 
     <div class="page-header">
         <div>
-            <h1>Zugriffsprotokolle</h1>
+            <h1>Zugriffsprotokoll</h1>
             <p class="subtitle">
-                Nachvollziehbarkeit aller Zugriffe auf Patientendaten
+                Übersicht aller dokumentierten Zugriffe auf Patientendaten.
             </p>
         </div>
 
-        <a class="button-link" href="/dashboard">Zurück zum Dashboard</a>
+        <a class="button-link secondary" href="{{ url_for('dashboard') }}">
+            Zurück zum Dashboard
+        </a>
     </div>
 
-    <div class="function-area">
-        <h2>Protokolle filtern</h2>
-
-        <form method="GET" action="/logs" class="filter-form">
+    <!-- Filterbereich -->
+    <section class="filter-card">
+        <div class="filter-header">
             <div>
-                <label>Suche</label>
-                <input
-                    type="text"
-                    name="search"
-                    value="{{ search_query }}"
-                    placeholder="Benutzer, Patient, Datenbereich oder Grund"
-                >
+                <h2>Protokoll filtern</h2>
+                <p>Suche gezielt nach Benutzer, Rolle, Patient, Begründung oder Zeitraum.</p>
             </div>
+        </div>
 
-            <div>
-                <label>Rolle</label>
-                <select name="role">
-                    <option value="">Alle Rollen</option>
-                    <option value="assistenzarzt" {% if role_filter == "assistenzarzt" %}selected{% endif %}>Assistenzarzt</option>
-                    <option value="oberarzt" {% if role_filter == "oberarzt" %}selected{% endif %}>Oberarzt</option>
-                    <option value="chefarzt" {% if role_filter == "chefarzt" %}selected{% endif %}>Chefarzt</option>
-                    <option value="nurse" {% if role_filter == "nurse" %}selected{% endif %}>Pflegekraft</option>
-                    <option value="lab" {% if role_filter == "lab" %}selected{% endif %}>Laborpersonal</option>
-                    <option value="admin" {% if role_filter == "admin" %}selected{% endif %}>Administrator</option>
-                </select>
-            </div>
+        <form method="GET" class="log-filter-form">
 
-            <button type="submit">Filtern</button>
-        </form>
-    </div>
+            <div class="filter-grid">
 
-    <h2>Erfasste Zugriffe</h2>
-
-    {% if logs %}
-        <div class="log-list">
-            {% for log in logs %}
-                <div class="log-card">
-                    <div class="log-header">
-                        <div>
-                            <h3>{{ log["patient_name"] }}</h3>
-                            <p>Patient {{ log["patient_id"] or "–" }} · {{ log["access_time"] }}</p>
-                        </div>
-
-                        {% if is_doctor_role(log["role"]) %}
-                            <span class="badge">{{ role_label(log["role"]) }}</span>
-                        {% elif log["role"] == "nurse" %}
-                            <span class="badge-green">Pflege</span>
-                        {% elif log["role"] == "lab" %}
-                            <span class="badge-yellow">Labor</span>
-                        {% elif log["role"] == "admin" %}
-                            <span class="badge-red">Admin</span>
-                        {% else %}
-                            <span class="badge">{{ log["role"] }}</span>
-                        {% endif %}
-                    </div>
-
-                    <div class="log-details">
-                        <p><strong>Benutzer:</strong> {{ log["username"] }}</p>
-                        <p><strong>Datenbereich:</strong> {{ log["accessed_data"] }}</p>
-                        <p><strong>Aktion:</strong> {{ log["action"] }}</p>
-                        <p><strong>Zugriffsgrund:</strong> {{ log["access_reason"] }}</p>
-                    </div>
+                <div class="form-group">
+                    <label for="username">Benutzer</label>
+                    <input
+                        type="text"
+                        id="username"
+                        name="username"
+                        placeholder="z. B. oberarzt"
+                        value="{{ username_filter }}"
+                    >
                 </div>
-            {% endfor %}
-        </div>
-    {% else %}
-        <div class="note">
-            Keine Zugriffsprotokolle gefunden.
-        </div>
-    {% endif %}
 
-    <br>
-    <a class="button-link logout" href="/logout">Abmelden</a>
+                <div class="form-group">
+                    <label for="role">Rolle</label>
+                    <select id="role" name="role">
+                        <option value="">Alle Rollen</option>
+
+                        <option value="assistenzarzt" {% if role_filter == "assistenzarzt" %}selected{% endif %}>
+                            Assistenzarzt
+                        </option>
+
+                        <option value="oberarzt" {% if role_filter == "oberarzt" %}selected{% endif %}>
+                            Oberarzt
+                        </option>
+
+                        <option value="chefarzt" {% if role_filter == "chefarzt" %}selected{% endif %}>
+                            Chefarzt
+                        </option>
+
+                        <option value="nurse_48" {% if role_filter == "nurse_48" %}selected{% endif %}>
+                            Pflege Station 48
+                        </option>
+                        <option value="nurse_49" {% if role_filter == "nurse_49" %}selected{% endif %}>
+                            Pflege Station 49
+                        </option>
+
+                        <option value="lab" {% if role_filter == "lab" %}selected{% endif %}>
+                            Labor
+                        </option>
+
+                        <option value="admin" {% if role_filter == "admin" %}selected{% endif %}>
+                            Admin
+                        </option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="patient">Patient</label>
+                    <input
+                        type="text"
+                        id="patient"
+                        name="patient"
+                        placeholder="Name des Patienten"
+                        value="{{ patient_filter }}"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="reason">Begründung</label>
+                    <input
+                        type="text"
+                        id="reason"
+                        name="reason"
+                        placeholder="z. B. Behandlung, Pflege, Notfall"
+                        value="{{ reason_filter }}"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="date_from">Von Datum</label>
+                    <input
+                        type="date"
+                        id="date_from"
+                        name="date_from"
+                        value="{{ date_from }}"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="date_to">Bis Datum</label>
+                    <input
+                        type="date"
+                        id="date_to"
+                        name="date_to"
+                        value="{{ date_to }}"
+                    >
+                </div>
+
+            </div>
+
+            <div class="filter-actions">
+                <button type="submit">Filter anwenden</button>
+                <a href="{{ url_for('logs') }}" class="button-link secondary">Filter zurücksetzen</a>
+            </div>
+
+        </form>
+    </section>
+
+    <!-- Ergebnisbereich -->
+    <section class="record-section">
+        <div class="section-header">
+            <div>
+                <h2>Gefundene Einträge</h2>
+                <p>{{ logs|length }} Protokolleinträge gefunden.</p>
+            </div>
+        </div>
+
+        {% if logs %}
+            <div class="table-wrapper">
+                <table class="clean-table">
+                    <thead>
+                        <tr>
+                            <th>Zeitpunkt</th>
+                            <th>Benutzer</th>
+                            <th>Rolle</th>
+                            <th>Patient</th>
+                            <th>Begründung</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for log in logs %}
+                            <tr>
+                                <td>{{ log["timestamp"] }}</td>
+                                <td>{{ log["username"] }}</td>
+                                <td>{{ log["role"] }}</td>
+                                <td>
+                                    {% if log["patient_name"] %}
+                                        {{ log["patient_name"] }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>{{ log["reason"] }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                Keine Protokolleinträge für diese Filter gefunden.
+            </div>
+        {% endif %}
+    </section>
 
 </div>
 

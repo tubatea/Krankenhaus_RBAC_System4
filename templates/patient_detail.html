@@ -57,49 +57,167 @@
             </div>
         </div>
     </div>
+{% if not access_unlocked %}
+<section class="record-section full-width-section">
+    <div class="section-header">
+        <div>
+            <h2>Zugriff freischalten</h2>
+            <p>Bitte wähle zuerst einen Zugriffsgrund, bevor du weitere Patientendaten öffnest.</p>
+        </div>
+    </div>
+
+    <form method="POST" class="access-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ request.args.get('next', '') }}">
+
+        <div class="form-group">
+            <label for="access_reason">Zugriffsgrund</label>
+            <select name="access_reason" id="access_reason" required>
+                <option value="">Bitte auswählen</option>
+                {% for reason in allowed_access_reasons %}
+                    <option value="{{ reason }}">{{ reason }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <button type="submit">Zugriff freischalten</button>
+    </form>
+</section>
+{% else %}
+<section class="record-section full-width-section">
+    <div class="success-message">
+        Zugriff auf diese Patientenakte ist fÃ¼r diese Sitzung freigeschaltet.
+    </div>
+</section>
+{% endif %}
+
+    {% if access_unlocked and patient_warnings %}
+    <section class="record-section full-width-section">
+        <div class="section-header">
+            <div>
+                <h2>Warnhinweise & Risiken</h2>
+                <p>Allergien, Isolation, Sturzrisiko und andere wichtige Hinweise</p>
+            </div>
+        </div>
+        <div class="warning-grid">
+            {% for warning in patient_warnings %}
+                <div class="warning-card {{ warning['severity'] }}">
+                    <strong>{{ warning["title"] }}</strong>
+                    <span>{{ warning["warning_type"] }}</span>
+                    {% if warning["description"] %}
+                        <p>{{ warning["description"] }}</p>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
 
     <!-- Schnellzugriffe -->
-    <div class="quick-actions">
-        <a href="/patients/{{ patient['id'] }}/curve" class="quick-action-card">
-            <span class="quick-icon">📈</span>
-            <div>
-                <strong>Patientenkurve</strong>
-                <p>Vitalwerte und Verlauf anzeigen</p>
-            </div>
-        </a>
+<div class="quick-actions">
 
-        <a href="/patients/{{ patient['id'] }}/medications" class="quick-action-card">
-            <span class="quick-icon">💊</span>
-            <div>
-                <strong>Medikationsplan</strong>
-                <p>Medikamente prüfen und dokumentieren</p>
-            </div>
-        </a>
+    {% if has_permission(role, "vitals.view") %}
+    <a href="{{ url_for('patient_curve', patient_id=patient['id']) }}" class="quick-action-card">
+        <span class="quick-icon">📈</span>
+        <div>
+            <strong>Patientenkurve</strong>
+            <p>Vitalwerte und Verlauf anzeigen</p>
+        </div>
+    </a>
+    {% endif %}
 
-        <a href="/patients/{{ patient['id'] }}/nursing-note" class="quick-action-card">
-            <span class="quick-icon">📝</span>
-            <div>
-                <strong>Pflegeeintrag</strong>
-                <p>Neue Pflegedokumentation erfassen</p>
-            </div>
-        </a>
+    {% if has_permission(role, "medication.view") %}
+    <a href="{{ url_for('medication_plan', patient_id=patient['id']) }}" class="quick-action-card">
+        <span class="quick-icon">💊</span>
+        <div>
+            <strong>Medikationsplan</strong>
+            <p>Medikamente prüfen und dokumentieren</p>
+        </div>
+    </a>
+    {% endif %}
 
-        <a href="/patients/{{ patient['id'] }}/doctor-order" class="quick-action-card">
-            <span class="quick-icon">🩺</span>
-            <div>
-                <strong>Ärztliche Anordnung</strong>
-                <p>Anordnung erstellen oder ansehen</p>
-            </div>
-        </a>
+    {% if has_permission(role, "nursing_notes.create") %}
+    <a href="{{ url_for('add_nursing_note', patient_id=patient['id']) }}" class="quick-action-card">
+        <span class="quick-icon">📝</span>
+        <div>
+            <strong>Pflegeeintrag</strong>
+            <p>Neue Pflegedokumentation erfassen</p>
+        </div>
+    </a>
+    {% endif %}
 
-        <a href="/patients/{{ patient['id'] }}/lab-report" class="quick-action-card">
-            <span class="quick-icon">🧪</span>
+    {% if has_permission(role, "orders.create") %}
+    <a href="{{ url_for('add_doctor_order', patient_id=patient['id']) }}" class="quick-action-card">
+        <span class="quick-icon">🩺</span>
+        <div>
+            <strong>Ärztliche Anordnung</strong>
+            <p>Anordnung erstellen oder ansehen</p>
+        </div>
+    </a>
+    {% endif %}
+
+    {% if has_permission(role, "lab.create") %}
+    <a href="{{ url_for('add_lab_report', patient_id=patient['id']) }}" class="quick-action-card">
+        <span class="quick-icon">🧪</span>
+        <div>
+            <strong>Laborbefund</strong>
+            <p>Laborwerte dokumentieren</p>
+        </div>
+    </a>
+    {% endif %}
+
+    {% if is_doctor_role(role) %}
+        <a href="{{ url_for('arztbrief', patient_id=patient['id']) }}" class="quick-action-card">
+            <span class="quick-icon">📄</span>
             <div>
-                <strong>Laborbefund</strong>
-                <p>Laborwerte dokumentieren</p>
+                <strong>Arztbrief</strong>
+                <p>Arztbrief erstellen oder Entwurf fortsetzen</p>
             </div>
         </a>
-    </div>
+    {% endif %}
+
+</div>
+
+    {% if access_unlocked %}
+    {% if has_permission(role, "lab_requests.create") %}
+    <section class="record-section full-width-section">
+        <div class="section-header">
+            <div>
+                <h2>Labor / Bildgebung anfordern</h2>
+                <p>Neue Untersuchung für Labor oder Bildgebung beauftragen</p>
+            </div>
+        </div>
+        <form method="POST" action="{{ url_for('add_lab_request', patient_id=patient['id']) }}" class="form-card">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-grid">
+                <div>
+                    <label>Anforderungsart</label>
+                    <select name="request_type">
+                        <option value="Laborwert">Laborwert</option>
+                        <option value="Mikrobiologie">Mikrobiologie</option>
+                        <option value="Bildgebung">Bildgebung</option>
+                        <option value="Pathologie">Pathologie</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Priorität</label>
+                    <select name="priority">
+                        <option value="normal">Normal</option>
+                        <option value="dringend">Dringend</option>
+                        <option value="kritisch">Kritisch</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Untersuchung</label>
+                    <input type="text" name="test_name" required placeholder="z. B. CRP, Blutkulturen, CT Thorax">
+                </div>
+            </div>
+            <label>Klinische Fragestellung</label>
+            <textarea name="clinical_question" placeholder="z. B. Pneumonie? Entzündungswerte kontrollieren."></textarea>
+            <button type="submit">Anforderung erstellen</button>
+        </form>
+    </section>
+    {% endif %}
 
     <!-- Hauptinhalt -->
     <div class="record-layout">
@@ -220,25 +338,60 @@
                 </div>
 
                 {% if lab_reports is defined and lab_reports %}
-                    <div class="table-wrapper">
-                        <table class="clean-table">
-                            <thead>
-                            <tr>
-                                <th>Parameter</th>
-                                <th>Wert</th>
-                                <th>Datum</th>
-                            </tr>
-                            </thead>
-                            <tbody>
-                            {% for lab in lab_reports %}
-                                <tr>
-                                    <td>{{ lab["parameter"] }}</td>
-                                    <td>{{ lab["value"] }}</td>
-                                    <td>{{ lab["created_at"] }}</td>
-                                </tr>
-                            {% endfor %}
-                            </tbody>
-                        </table>
+                    <div class="lab-report-list">
+                        {% for lab in lab_reports %}
+                            <article class="lab-report-card {% if lab['status'] == 'kritisch' %}critical{% endif %}">
+                                <div class="lab-report-header">
+                                    <div>
+                                        <span class="lab-type">{{ lab["report_type"] or "Laborwert" }}</span>
+                                        <h3>{{ lab["test_name"] }}</h3>
+                                    </div>
+                                    <span class="lab-status {{ lab['status'] or 'final' }}">{{ lab["status"] or "final" }}</span>
+                                </div>
+
+                                <div class="lab-value-grid">
+                                    <div>
+                                        <span>Ergebnis</span>
+                                        <strong>{{ lab["result_value"] }}{% if lab["result_unit"] %} {{ lab["result_unit"] }}{% endif %}</strong>
+                                    </div>
+                                    <div>
+                                        <span>Referenz</span>
+                                        <strong>{{ lab["reference_range"] or "–" }}</strong>
+                                    </div>
+                                    <div>
+                                        <span>Material / Modalität</span>
+                                        <strong>{{ lab["sample_material"] or "–" }}</strong>
+                                    </div>
+                                    <div>
+                                        <span>Datum</span>
+                                        <strong>{{ lab["collected_at"] or lab["created_at"] }}</strong>
+                                    </div>
+                                </div>
+
+                                {% if lab["interpretation"] %}
+                                    <p class="lab-interpretation">{{ lab["interpretation"] }}</p>
+                                {% endif %}
+
+                                {% if lab["notes"] %}
+                                    <p class="lab-note"><strong>Notiz:</strong> {{ lab["notes"] }}</p>
+                                {% endif %}
+
+                                {% set files = lab_files_by_report.get(lab["id"], []) %}
+                                {% if files %}
+                                    <div class="lab-file-grid">
+                                        {% for file in files %}
+                                            <a class="lab-file-card" href="{{ url_for('static', filename='uploads/lab_reports/' ~ file['filename']) }}" target="_blank">
+                                                <img src="{{ url_for('static', filename='uploads/lab_reports/' ~ file['filename']) }}" alt="{{ file['original_filename'] }}">
+                                                <div>
+                                                    <strong>{{ file["original_filename"] }}</strong>
+                                                    <span>{{ file["description"] or "Bildanhang" }}</span>
+                                                </div>
+                                            </a>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
                     </div>
                 {% else %}
                     <div class="empty-state">
@@ -250,6 +403,30 @@
         </div>
     </div>
 
+    {% if handover_notes is defined and handover_notes %}
+    <section class="record-section full-width-section">
+        <div class="section-header">
+            <div>
+                <h2>Übergabeinformationen</h2>
+                <p>Aktuelle Hinweise aus den letzten Übergaben</p>
+            </div>
+        </div>
+
+        <div class="handover-note-list">
+            {% for note in handover_notes %}
+                <div class="handover-note-card">
+                    <div class="note-meta">
+                        <strong>{{ note["username"] }}</strong>
+                        <span>{{ note["shift_type"] }} · {{ note["created_at"] }}</span>
+                    </div>
+                    <p>{{ note["note_text"] }}</p>
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if show_access_logs %}
     <!-- Zugriffsprotokoll -->
     <section class="record-section full-width-section">
         <div class="section-header">
@@ -288,6 +465,8 @@
             </div>
         {% endif %}
     </section>
+    {% endif %}
+    {% endif %}
 
 </div>
 

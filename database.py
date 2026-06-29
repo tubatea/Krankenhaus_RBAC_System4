@@ -198,6 +198,81 @@ def create_database():
     )
     """)
 
+    medication_columns = {row[1] for row in cursor.execute("PRAGMA table_info(medication_plan)")}
+    for column_name, column_definition in {
+        "medication_type": "TEXT NOT NULL DEFAULT 'Regelmedikation'",
+        "paused_at": "TIMESTAMP",
+        "stopped_at": "TIMESTAMP",
+        "stopped_by": "TEXT",
+        "stop_reason": "TEXT",
+    }.items():
+        if column_name not in medication_columns:
+            cursor.execute(f"ALTER TABLE medication_plan ADD COLUMN {column_name} {column_definition}")
+
+    lab_columns = {row[1] for row in cursor.execute("PRAGMA table_info(lab_reports)")}
+    for column_name, column_definition in {
+        "report_type": "TEXT NOT NULL DEFAULT 'Laborwert'",
+        "sample_material": "TEXT",
+        "result_unit": "TEXT",
+        "collected_at": "TEXT",
+        "status": "TEXT NOT NULL DEFAULT 'final'",
+        "notes": "TEXT",
+    }.items():
+        if column_name not in lab_columns:
+            cursor.execute(f"ALTER TABLE lab_reports ADD COLUMN {column_name} {column_definition}")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS lab_report_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lab_report_id INTEGER NOT NULL,
+        filename TEXT NOT NULL,
+        original_filename TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        description TEXT,
+        uploaded_by TEXT NOT NULL,
+        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (lab_report_id) REFERENCES lab_reports(id) ON DELETE CASCADE
+    )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_lab_files_report ON lab_report_files(lab_report_id)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS lab_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER NOT NULL,
+        requested_by_user_id INTEGER NOT NULL,
+        request_type TEXT NOT NULL,
+        test_name TEXT NOT NULL,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        clinical_question TEXT,
+        status TEXT NOT NULL DEFAULT 'offen',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        completed_by TEXT,
+        FOREIGN KEY (patient_id) REFERENCES patients(id),
+        FOREIGN KEY (requested_by_user_id) REFERENCES users(id)
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS patient_warnings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER NOT NULL,
+        warning_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        severity TEXT NOT NULL DEFAULT 'info',
+        created_by TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        FOREIGN KEY (patient_id) REFERENCES patients(id)
+    )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_lab_requests_patient_status ON lab_requests(patient_id, status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_patient_warnings_active ON patient_warnings(patient_id, is_active)")
+
     # Testbenutzer einfügen, wenn noch keine Benutzer existieren
     cursor.execute("SELECT COUNT(*) FROM users")
     user_count = cursor.fetchone()[0]
@@ -208,7 +283,8 @@ def create_database():
         VALUES (?, ?, ?, ?)
         """, [
             ("arzt", generate_password_hash("1234"), "assistenzarzt", 1),
-            ("pflege", generate_password_hash("1234"), "nurse", 1),
+            ("pflege", generate_password_hash("1234"), "nurse_48", 1),
+            ("pflege49", generate_password_hash("1234"), "nurse_49", 1),
             ("labor", generate_password_hash("1234"), "lab", 1),
             ("admin", generate_password_hash("1234"), "admin", 1),
             ("oberarzt", generate_password_hash("1234"), "oberarzt", 1),
@@ -216,8 +292,9 @@ def create_database():
         ])
 
     cursor.execute("UPDATE users SET role = 'assistenzarzt' WHERE role = 'doctor'")
+    cursor.execute("UPDATE users SET role = 'nurse_48' WHERE username = 'pflege' AND role = 'nurse'")
 
-    for username, role in (("oberarzt", "oberarzt"), ("chefarzt", "chefarzt")):
+    for username, role in (("oberarzt", "oberarzt"), ("chefarzt", "chefarzt"), ("pflege49", "nurse_49")):
         cursor.execute("""
             INSERT OR IGNORE INTO users (username, password, role, is_active)
             VALUES (?, ?, ?, 1)
@@ -253,7 +330,8 @@ def create_database():
     default_station_access = {
         "arzt": ("48",),
         "oberarzt": ("48",),
-        "pflege": ("48", "49"),
+        "pflege": ("48",),
+        "pflege49": ("49",),
         "labor": ("48", "49"),
     }
     station_assignment_count = cursor.execute(
@@ -380,6 +458,19 @@ def create_database():
                 "arzt",
                 "offen"
             )
+        ])
+
+    warning_count = cursor.execute("SELECT COUNT(*) FROM patient_warnings").fetchone()[0]
+    if warning_count == 0:
+        cursor.executemany("""
+            INSERT INTO patient_warnings (
+                patient_id, warning_type, title, description, severity, created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, [
+            (1, "Allergie", "Penicillin-Allergie", "Bei Antibiotika-Verordnung beachten.", "critical", "admin"),
+            (2, "Isolation", "Infektverdacht", "Hygienemaßnahmen und Schutzkleidung beachten.", "warning", "pflege"),
+            (5, "Sturzrisiko", "Erhöhtes Sturzrisiko", "Mobilisation nur mit Unterstützung.", "warning", "pflege"),
         ])
 
     # Testdaten für die Patientenkurve einfügen
