@@ -31,6 +31,22 @@
         {% endif %}
     </div>
 
+    <div class="form-card">
+        <h2>Datenschutz-Markierung</h2>
+        <form method="POST" action="{{ url_for('update_patient_privacy', patient_id=patient['id']) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Privacy Level</label>
+            <select name="privacy_level">
+                <option value="normal" {% if patient["privacy_level"] == "normal" %}selected{% endif %}>Normal</option>
+                <option value="vip" {% if patient["privacy_level"] == "vip" %}selected{% endif %}>VIP</option>
+                <option value="gesperrt" {% if patient["privacy_level"] == "gesperrt" %}selected{% endif %}>Gesperrt</option>
+            </select>
+            <label>Hinweis</label>
+            <textarea name="privacy_note" maxlength="500">{{ patient["privacy_note"] or "" }}</textarea>
+            <button type="submit">Datenschutz-Markierung speichern</button>
+        </form>
+    </div>
+
     {% if patient["admission_id"] %}
         <div class="record-grid">
             <div class="form-card">

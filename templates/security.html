@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Security Dashboard | Krankenhaus-RBAC-System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=70">
+</head>
+<body>
+
+<div class="container wide-container security-dashboard">
+    <div class="page-header">
+        <div>
+            <h1>Security Dashboard</h1>
+            <p class="subtitle">Aktive Sitzungen, Login-Schutz und verdächtige Zugriffe im Überblick.</p>
+        </div>
+        <a class="button-link secondary" href="{{ url_for('dashboard') }}">Zurück zum Dashboard</a>
+    </div>
+
+    <section class="security-metric-grid">
+        <div class="security-metric">
+            <span>Aktive Sitzungen</span>
+            <strong>{{ metrics.active_sessions }}</strong>
+        </div>
+        <div class="security-metric warning">
+            <span>Offene Alerts</span>
+            <strong>{{ metrics.open_alerts }}</strong>
+        </div>
+        <div class="security-metric critical">
+            <span>Kritische Alerts</span>
+            <strong>{{ metrics.critical_alerts }}</strong>
+        </div>
+        <div class="security-metric">
+            <span>Fehlversuche 24h</span>
+            <strong>{{ metrics.failed_logins_24h }}</strong>
+        </div>
+    </section>
+
+    <section class="record-section">
+        <div class="section-header">
+            <div>
+                <h2>Security Alerts</h2>
+                <p>Automatisch erkannte Risiken wie Break-glass oder ungewöhnlich viele Aktenzugriffe.</p>
+            </div>
+        </div>
+
+        {% if security_alerts %}
+            <div class="security-alert-list">
+                {% for alert in security_alerts %}
+                    <article class="security-alert {{ alert['severity'] }} {% if alert['status'] == 'closed' %}closed{% endif %}">
+                        <div>
+                            <span class="security-badge {{ alert['severity'] }}">{{ alert["severity"] }}</span>
+                            <h3>{{ alert["message"] }}</h3>
+                            <p>
+                                {{ alert["created_at"] }}
+                                {% if alert["username"] %} · {{ alert["username"] }}{% endif %}
+                                {% if alert["role"] %} · {{ role_label(alert["role"]) }}{% endif %}
+                                {% if alert["patient_name"] %} · {{ alert["patient_name"] }}{% endif %}
+                            </p>
+                            <small>Status: {{ alert["status"] }} · Typ: {{ alert["alert_type"] }}</small>
+                        </div>
+
+                        {% if alert["status"] == "open" %}
+                            <form method="POST" action="{{ url_for('close_security_alert', alert_id=alert['id']) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="small-btn" type="submit">Schließen</button>
+                            </form>
+                        {% endif %}
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">Keine Security Alerts vorhanden.</div>
+        {% endif %}
+    </section>
+
+    <section class="record-section">
+        <div class="section-header">
+            <div>
+                <h2>Aktive Sitzungen</h2>
+                <p>Admins können Sitzungen beenden; die betroffene Person wird beim nächsten Klick ausgeloggt.</p>
+            </div>
+        </div>
+
+        {% if active_sessions %}
+            <div class="table-wrapper">
+                <table class="clean-table">
+                    <thead>
+                        <tr>
+                            <th>Benutzer</th>
+                            <th>Rolle</th>
+                            <th>IP</th>
+                            <th>Dienst</th>
+                            <th>Login</th>
+                            <th>Zuletzt gesehen</th>
+                            <th>Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for active in active_sessions %}
+                            <tr>
+                                <td>{{ active["username"] }}</td>
+                                <td>{{ role_label(active["role"]) }}</td>
+                                <td>{{ active["ip_address"] or "-" }}</td>
+                                <td>{{ active["current_shift"] or "-" }}</td>
+                                <td>{{ active["login_at"] }}</td>
+                                <td>{{ active["last_seen_at"] }}</td>
+                                <td>
+                                    <form method="POST" action="{{ url_for('close_security_session', session_id=active['session_id']) }}">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button class="small-btn danger-button" type="submit">Beenden</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">Keine aktiven Sitzungen.</div>
+        {% endif %}
+    </section>
+
+    <section class="record-section two-column-security">
+        <div>
+            <div class="section-header">
+                <div>
+                    <h2>Fehlgeschlagene Logins</h2>
+                    <p>Zusammenfassung der letzten 24 Stunden.</p>
+                </div>
+            </div>
+
+            {% if failed_login_summary %}
+                <div class="table-wrapper">
+                    <table class="clean-table">
+                        <thead>
+                            <tr>
+                                <th>Benutzer</th>
+                                <th>Versuche</th>
+                                <th>Letzter Versuch</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in failed_login_summary %}
+                                <tr>
+                                    <td>{{ item["username"] }}</td>
+                                    <td>{{ item["attempts"] }}</td>
+                                    <td>{{ item["last_attempt"] }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="empty-state">Keine fehlgeschlagenen Logins in den letzten 24 Stunden.</div>
+            {% endif %}
+        </div>
+
+        <div>
+            <div class="section-header">
+                <div>
+                    <h2>Aktive Login-Sperren</h2>
+                    <p>Temporär gesperrte Benutzernamen.</p>
+                </div>
+            </div>
+
+            {% if lockouts %}
+                <div class="security-alert-list compact">
+                    {% for lockout in lockouts %}
+                        <article class="security-alert critical">
+                            <div>
+                                <h3>{{ lockout["username"] }}</h3>
+                                <p>Fehlversuche: {{ lockout["failed_count"] }}</p>
+                                <small>Gesperrt bis: {{ lockout["locked_until"] }}</small>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">Keine aktiven Sperren.</div>
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+</body>
+</html>

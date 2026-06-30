@@ -34,6 +34,9 @@
         {% if session["role"] == "admin" %}
             <a class="button-link" href="/add_patient">Neuen Patienten anlegen</a>
         {% endif %}
+        {% if is_doctor_role(session["role"]) or session["role"] == "admin" %}
+            <a class="button-link secondary" href="{{ url_for('historical_patients') }}">Historische Patienten</a>
+        {% endif %}
     </div>
 
     <h2>Gefundene Patienten</h2>
@@ -50,6 +53,9 @@
                         <h3>{{ patient["name"] }}</h3>
                         <p><strong>Geburtsdatum:</strong> {{ patient["birthdate"] }}</p>
                         <p><strong>Patienten-ID:</strong> {{ patient["id"] }}</p>
+                        {% if patient["privacy_level"] in ["vip", "gesperrt"] %}
+                            <p><span class="badge-red">{{ patient["privacy_level"]|upper }}</span> {{ patient["privacy_note"] or "" }}</p>
+                        {% endif %}
                         {% if patient["admission_id"] %}
                             <p><strong>Station:</strong> {{ patient["station_number"] }}</p>
                             <p><strong>Zimmer / Bett:</strong> {{ patient["room_number"] }} / {{ patient["bed_label"] }}</p>

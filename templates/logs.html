@@ -150,6 +150,7 @@
                             <th>Benutzer</th>
                             <th>Rolle</th>
                             <th>Patient</th>
+                            <th>Privacy Risk</th>
                             <th>Begründung</th>
                         </tr>
                     </thead>
@@ -166,6 +167,17 @@
                                     {% else %}
                                         -
                                     {% endif %}
+                                </td>
+                                <td>
+                                    {% if log["privacy_risk_score"] >= 75 %}
+                                        🔴 kritisch
+                                    {% elif log["privacy_risk_score"] >= 40 %}
+                                        🟡 auffällig
+                                    {% else %}
+                                        🟢 unkritisch
+                                    {% endif %}
+                                    <br>
+                                    <small>{{ log["privacy_risk_score"] }}/100 · {{ log["privacy_risk_reasons"] }}</small>
                                 </td>
                                 <td>{{ log["reason"] }}</td>
                             </tr>

@@ -33,6 +33,9 @@
         <div class="patient-main-info">
             <h2>{{ patient["name"] }}</h2>
             <p>Geburtsdatum: {{ patient["birthdate"] }}</p>
+            {% if patient["privacy_level"] in ["vip", "gesperrt"] %}
+                <p><span class="badge-red">{{ patient["privacy_level"]|upper }}</span> {{ patient["privacy_note"] or "" }}</p>
+            {% endif %}
         </div>
 
         <div class="patient-info-grid">
@@ -89,6 +92,24 @@
         Zugriff auf diese Patientenakte ist fÃ¼r diese Sitzung freigeschaltet.
     </div>
 </section>
+{% if privacy_risk %}
+<section class="record-section full-width-section privacy-risk-card {{ privacy_risk['ampel']['color'] }}">
+    <div class="section-header">
+        <div>
+            <h2>{{ privacy_risk["ampel"]["icon"] }} {{ privacy_risk["ampel"]["label"] }}</h2>
+            <p>Data Privacy Risk Score: {{ privacy_risk["score"] }}/100</p>
+        </div>
+        <span class="privacy-risk-pill {{ privacy_risk['ampel']['color'] }}">
+            {{ privacy_risk["level"] }}
+        </span>
+    </div>
+    <ul class="privacy-risk-list">
+        {% for reason in privacy_risk["reasons"] %}
+            <li>{{ reason }}</li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
 {% endif %}
 
     {% if access_unlocked and patient_warnings %}

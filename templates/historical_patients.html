@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Historische Patienten</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=90">
+</head>
+<body>
+
+<div class="container wide-container">
+    <div class="page-header">
+        <div>
+            <h1>Historische Patienten</h1>
+            <p class="subtitle">Entlassene Patienten mit Aufnahme- und Entlassungshistorie.</p>
+        </div>
+        <a class="button-link secondary" href="{{ url_for('dashboard') }}">Zurück zum Dashboard</a>
+    </div>
+
+    <section class="filter-card">
+        <form method="GET" class="search-form">
+            <input type="text" name="search" value="{{ search_query }}" placeholder="Patient suchen">
+            <button type="submit">Suchen</button>
+        </form>
+    </section>
+
+    {% if patients %}
+        <div class="patient-grid">
+            {% for patient in patients %}
+                <article class="patient-list-card historical-card">
+                    <div class="patient-avatar">{{ patient["name"][0] }}</div>
+                    <div class="patient-info">
+                        <h3>{{ patient["name"] }}</h3>
+                        <p><strong>Geburtsdatum:</strong> {{ patient["birthdate"] }}</p>
+                        <p><strong>Letzte Station:</strong> {{ patient["station_number"] }} · Zimmer {{ patient["room_number"] }} · Bett {{ patient["bed_label"] }}</p>
+                        <p><strong>Aufnahme:</strong> {{ patient["admitted_at"] }}</p>
+                        <p><strong>Entlassung:</strong> {{ patient["discharged_at"] }} · {{ patient["discharged_by"] or "-" }}</p>
+                        <p><strong>Grund:</strong> {{ patient["discharge_reason"] or "-" }}</p>
+                    </div>
+                    <div class="patient-actions">
+                        {% if session["role"] == "admin" %}
+                            <a class="button-link secondary" href="{{ url_for('patient_location', patient_id=patient['id']) }}">
+                                Verlauf / Wiederaufnahme
+                            </a>
+                        {% endif %}
+                        <a class="button-link" href="{{ url_for('patient_detail', patient_id=patient['id']) }}">
+                            Historische Akte öffnen
+                        </a>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">Keine entlassenen Patienten gefunden.</div>
+    {% endif %}
+</div>
+
+</body>
+</html>

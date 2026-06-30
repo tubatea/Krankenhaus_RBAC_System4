@@ -22,6 +22,28 @@
         </a>
     </div>
 
+    {% if published %}
+        <section class="record-section discharge-after-letter">
+            <div class="section-header">
+                <div>
+                    <h2>Arztbrief wurde gespeichert</h2>
+                    <p>Du kannst den Patienten jetzt direkt entlassen. Danach erscheint er in den historischen Patienten.</p>
+                </div>
+            </div>
+            {% if current_admission %}
+                <form method="POST" action="{{ url_for('doctor_discharge', patient_id=patient['id']) }}" class="form-card">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <label>Entlassungsgrund</label>
+                    <textarea name="reason" maxlength="500" required>Entlassung nach abgeschlossenem Arztbrief.</textarea>
+                    <button type="submit" class="danger-button">Patient entlassen</button>
+                </form>
+            {% else %}
+                <div class="empty-state">Patient ist bereits entlassen.</div>
+                <a class="button-link" href="{{ url_for('historical_patients') }}">Historische Patienten öffnen</a>
+            {% endif %}
+        </section>
+    {% endif %}
+
     <section class="record-section">
         <form method="POST" id="arztbrief-form">
             <input type="hidden" name="csrf_token" id="csrf_token" value="{{ csrf_token() }}">
@@ -90,6 +112,28 @@
         });
     }
 
+    function autosaveDraftBeacon() {
+        const contentField = document.getElementById("arztbrief_content");
+        const patientField = document.getElementById("patient_id");
+        const csrfField = document.getElementById("csrf_token");
+
+        if (!contentField || !patientField || !csrfField) {
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("csrf_token", csrfField.value);
+        formData.append("patient_id", patientField.value);
+        formData.append("draft_type", "arztbrief");
+        formData.append("content", contentField.value);
+
+        if (navigator.sendBeacon) {
+            navigator.sendBeacon("/autosave_draft", formData);
+        } else {
+            autosaveDraft();
+        }
+    }
+
     function logoutAfterInactivity() {
         autosaveDraft();
 
@@ -107,6 +151,8 @@
         document.addEventListener(eventName, resetInactivityTimer);
     });
 
+    window.addEventListener("pagehide", autosaveDraftBeacon);
+    window.addEventListener("beforeunload", autosaveDraftBeacon);
     setInterval(autosaveDraft, 15000);
     resetInactivityTimer();
 </script>

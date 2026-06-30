@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Notfallzugriff | Krankenhaus-RBAC-System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=70">
+</head>
+<body>
+
+<div class="container security-container">
+    <div class="security-warning-hero">
+        <span class="security-badge critical">Break-glass</span>
+        <h1>Notfallzugriff erforderlich</h1>
+        <p>
+            Du hast normalerweise keinen Stationszugriff auf diese Patientenakte.
+            Ein Notfallzugriff erlaubt den Zugriff zeitlich begrenzt und wird
+            automatisch als kritischer Security-Alert protokolliert.
+        </p>
+    </div>
+
+    <section class="security-card">
+        <h2>{{ patient["name"] }}</h2>
+        <div class="security-meta-grid">
+            <div>
+                <span>Geburtsdatum</span>
+                <strong>{{ patient["birthdate"] }}</strong>
+            </div>
+            <div>
+                <span>Station</span>
+                <strong>{{ patient["station_number"] or "-" }}</strong>
+            </div>
+            <div>
+                <span>Zimmer / Bett</span>
+                <strong>{{ patient["room_number"] or "-" }} / {{ patient["bed_label"] or "-" }}</strong>
+            </div>
+        </div>
+    </section>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <form method="POST" class="security-card break-glass-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label for="reason_detail">Notfallbegründung</label>
+        <textarea
+            id="reason_detail"
+            name="reason_detail"
+            rows="5"
+            required
+            placeholder="z. B. akute Verschlechterung, Reanimation, dringende ärztliche Entscheidung..."
+        ></textarea>
+
+        <label class="checkbox-row">
+            <input type="checkbox" name="confirm_break_glass" value="yes" required>
+            <span>Ich bestätige, dass dieser Zugriff medizinisch notwendig ist.</span>
+        </label>
+
+        <div class="form-actions">
+            <button type="submit" class="danger-button">Notfallzugriff aktivieren</button>
+            <a class="button-link secondary" href="{{ url_for('patients') }}">Abbrechen</a>
+        </div>
+    </form>
+</div>
+
+</body>
+</html>

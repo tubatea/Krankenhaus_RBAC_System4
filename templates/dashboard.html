@@ -107,6 +107,14 @@
                 </div>
             </div>
 
+            {% if is_doctor_role(role) or role == "admin" %}
+                <a class="quick-action" href="{{ url_for('historical_patients') }}">
+                    <span>Historie</span>
+                    <strong>Historische Patienten</strong>
+                    <p>Entlassene Patienten ansehen oder wieder aufnehmen</p>
+                </a>
+            {% endif %}
+
             {% if is_doctor_role(role) or is_nurse_role(role) %}
                 <div class="kpi-card">
                     <div class="kpi-icon purple">A</div>
@@ -164,6 +172,15 @@
                         <span class="kpi-label">Zugriffslogs</span>
                         <strong class="kpi-number">{{ access_logs_count }}</strong>
                         <p>Dokumentierte Zugriffe auf Patientendaten</p>
+                    </div>
+                </div>
+
+                <div class="kpi-card security-kpi">
+                    <div class="kpi-icon orange">S</div>
+                    <div>
+                        <span class="kpi-label">Security Alerts</span>
+                        <strong class="kpi-number">{{ open_security_alerts_count }}</strong>
+                        <p>{{ active_sessions_count }} aktive Sitzungen im System</p>
                     </div>
                 </div>
             {% endif %}
@@ -339,6 +356,10 @@
                                 </div>
                             </div>
 
+                            <a class="small-btn secondary" href="{{ url_for('patient_detail', patient_id=notification['patient_id']) }}">
+                                Patient öffnen
+                            </a>
+
                             <form method="POST" action="/close_notification/{{ notification['id'] }}">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button class="small-btn" type="submit">Schließen</button>
@@ -399,6 +420,12 @@
                     <span>Audit</span>
                     <strong>Zugriffslogs</strong>
                     <p>Protokollierte Patientenzugriffe prüfen</p>
+                </a>
+
+                <a class="quick-action" href="{{ url_for('security_dashboard') }}">
+                    <span>Security</span>
+                    <strong>Security Dashboard</strong>
+                    <p>Sitzungen, Login-Sperren und verdächtige Zugriffe prüfen</p>
                 </a>
 
                 <a class="quick-action" href="{{ url_for('add_patient') }}">

@@ -53,6 +53,11 @@
                     {% else %}
                         <span class="badge-red">Deaktiviert</span>
                     {% endif %}
+                    {% if user["locked_until"] %}
+                        <br>
+                        <span class="badge-red">Gesperrt bis {{ user["locked_until"] }}</span>
+                        <small>{{ user["failed_count"] }} Fehlversuche</small>
+                    {% endif %}
                 </td>
                 <td>
                     {% if user["role"] in ["assistenzarzt", "oberarzt", "lab"] %}
@@ -81,6 +86,12 @@
                                 {% if user["is_active"] %}Deaktivieren{% else %}Aktivieren{% endif %}
                             </button>
                         </form>
+                        {% if user["locked_until"] %}
+                            <form method="POST" action="{{ url_for('unlock_user', user_id=user['id']) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit">Entsperren</button>
+                            </form>
+                        {% endif %}
                     {% else %}
                         <span class="badge">Aktuelles Konto</span>
                     {% endif %}

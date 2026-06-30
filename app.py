@@ -1,4 +1,5 @@
 import os
+import json
 import secrets
 import sqlite3
 import uuid
@@ -32,6 +33,9 @@ ALLOWED_LAB_FILE_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif"}
 LAB_UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
 PATIENT_ACCESS_TTL_SECONDS = 15 * 60
+MAX_FAILED_LOGIN_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 5
+BREAK_GLASS_REASON = "Notfallzugriff"
 DOCTOR_ROLES = {"assistenzarzt", "oberarzt", "chefarzt"}
 NURSE_ROLES = {"nurse", "nurse_48", "nurse_49"}
 CLINICAL_ROLES = DOCTOR_ROLES | NURSE_ROLES | {"lab"}
@@ -55,22 +59,30 @@ def get_today_shift():
     return shift["shift_type"] if shift else None
 
 ROLE_ACCESS_REASONS = {
-    "assistenzarzt": ("Behandlung", "Notfall", "Übergabe"),
-    "oberarzt": ("Behandlung", "Notfall", "Übergabe"),
-    "chefarzt": ("Behandlung", "Notfall", "Übergabe"),
-    "nurse": ("Pflege", "Notfall", "Übergabe"),
-    "nurse_48": ("Pflege", "Notfall", "Übergabe"),
-    "nurse_49": ("Pflege", "Notfall", "Übergabe"),
-    "lab": ("Laboruntersuchung", "Notfall"),
+    "assistenzarzt": ("Behandlung", "Übergabe"),
+    "oberarzt": ("Behandlung", "Übergabe"),
+    "chefarzt": ("Behandlung", "Übergabe"),
+    "nurse": ("Pflege", "Übergabe"),
+    "nurse_48": ("Pflege", "Übergabe"),
+    "nurse_49": ("Pflege", "Übergabe"),
+    "lab": ("Laboruntersuchung",),
     "admin": ("Administrative Prüfung",),
 }
 VALID_ACCESS_REASONS = {
     reason for reasons in ROLE_ACCESS_REASONS.values() for reason in reasons
 }
 
+for role_name in CLINICAL_ROLES:
+    ROLE_ACCESS_REASONS[role_name] = tuple(dict.fromkeys(
+        list(ROLE_ACCESS_REASONS.get(role_name, ())) + ["Übergabe", BREAK_GLASS_REASON]
+    ))
+VALID_ACCESS_REASONS = {
+    reason for reasons in ROLE_ACCESS_REASONS.values() for reason in reasons
+}
+
 
 def normalize_access_reason(reason):
-    return (reason or "").replace("Ãœ", "Ü")
+    return (reason or "").replace("ÃƒÅ“", "Ü").replace("Ãœ", "Ü")
 
 
 def is_allowed_lab_file(filename):
@@ -394,7 +406,7 @@ def get_csrf_token():
 @app.before_request
 def check_session_timeout():
     # Diese Endpunkte sollen den Inaktivitäts-Timer nicht verlängern.
-    allowed_routes = {"login", "logout", "static", "autosave_draft"}
+    allowed_routes = {"login", "logout", "static"}
 
     if request.endpoint in allowed_routes:
         return
@@ -409,10 +421,20 @@ def check_session_timeout():
         now = datetime.now()
 
         if now - last_activity_time > timedelta(minutes=10):
+            if request.endpoint == "autosave_draft":
+                return
+            deactivate_current_session()
             session.clear()
             return redirect(url_for("login"))
 
-    session["last_activity"] = datetime.now().isoformat()
+    if not update_active_session():
+        session.clear()
+        if request.endpoint == "autosave_draft":
+            return {"success": False, "message": "Sitzung beendet"}, 401
+        return redirect(url_for("login"))
+
+    if request.endpoint != "autosave_draft":
+        session["last_activity"] = datetime.now().isoformat()
 
 
 @app.context_processor
@@ -469,6 +491,331 @@ def get_db_connection():
     connection = sqlite3.connect("hospital.db")
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def get_client_ip():
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def create_security_alert(alert_type, message, severity="warning", username=None, role=None, patient_id=None, metadata=None, connection=None):
+    owns_connection = connection is None
+    if connection is None:
+        connection = get_db_connection()
+
+    connection.execute("""
+        INSERT INTO security_alerts (
+            alert_type, username, role, patient_id, message, severity, metadata
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        alert_type,
+        username or session.get("username"),
+        role or session.get("role"),
+        patient_id,
+        message,
+        severity,
+        json.dumps(metadata or {}, ensure_ascii=False),
+    ))
+
+    if owns_connection:
+        connection.commit()
+        connection.close()
+
+
+def is_account_locked(username):
+    connection = get_db_connection()
+    row = connection.execute("""
+        SELECT locked_until FROM account_lockouts
+        WHERE username = ?
+    """, (username,)).fetchone()
+
+    if not row or not row["locked_until"]:
+        connection.close()
+        return None
+
+    locked_until = datetime.fromisoformat(row["locked_until"])
+    if locked_until <= datetime.now():
+        connection.execute("""
+            UPDATE account_lockouts
+            SET failed_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE username = ?
+        """, (username,))
+        connection.commit()
+        connection.close()
+        return None
+
+    connection.close()
+    return locked_until
+
+
+def record_failed_login(username, reason="bad_credentials"):
+    username = (username or "").strip() or "unknown"
+    connection = get_db_connection()
+
+    connection.execute("""
+        INSERT INTO failed_login_attempts (username, ip_address, success, reason)
+        VALUES (?, ?, 0, ?)
+    """, (username, get_client_ip(), reason))
+
+    row = connection.execute("""
+        SELECT failed_count FROM account_lockouts
+        WHERE username = ?
+    """, (username,)).fetchone()
+    failed_count = (row["failed_count"] if row else 0) + 1
+    locked_until = None
+
+    if failed_count >= MAX_FAILED_LOGIN_ATTEMPTS:
+        locked_until = datetime.now() + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+        create_security_alert(
+            "failed_login_lockout",
+            f"Benutzerkonto '{username}' wurde nach mehreren fehlgeschlagenen Loginversuchen temporär gesperrt.",
+            "critical",
+            username=username,
+            metadata={"failed_count": failed_count, "locked_until": locked_until.isoformat()},
+            connection=connection,
+        )
+
+    connection.execute("""
+        INSERT INTO account_lockouts (username, failed_count, locked_until, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(username) DO UPDATE SET
+            failed_count = excluded.failed_count,
+            locked_until = excluded.locked_until,
+            updated_at = CURRENT_TIMESTAMP
+    """, (username, failed_count, locked_until.isoformat() if locked_until else None))
+
+    connection.commit()
+    connection.close()
+    return locked_until
+
+
+def reset_login_failures(username):
+    connection = get_db_connection()
+    connection.execute("""
+        INSERT INTO failed_login_attempts (username, ip_address, success, reason)
+        VALUES (?, ?, 1, 'success')
+    """, (username, get_client_ip()))
+    connection.execute("""
+        INSERT INTO account_lockouts (username, failed_count, locked_until, updated_at)
+        VALUES (?, 0, NULL, CURRENT_TIMESTAMP)
+        ON CONFLICT(username) DO UPDATE SET
+            failed_count = 0,
+            locked_until = NULL,
+            updated_at = CURRENT_TIMESTAMP
+    """, (username,))
+    connection.commit()
+    connection.close()
+
+
+def register_active_session(user):
+    session_id = secrets.token_urlsafe(32)
+    session["session_id"] = session_id
+
+    connection = get_db_connection()
+    connection.execute("""
+        INSERT INTO active_sessions (
+            session_id, user_id, username, role, ip_address, user_agent, current_shift
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        session_id,
+        user["id"],
+        user["username"],
+        user["role"],
+        get_client_ip(),
+        request.headers.get("User-Agent", ""),
+        get_today_shift(),
+    ))
+    connection.commit()
+    connection.close()
+
+
+def deactivate_current_session():
+    session_id = session.get("session_id")
+    if not session_id:
+        return
+
+    connection = get_db_connection()
+    connection.execute("""
+        UPDATE active_sessions
+        SET is_active = 0, last_seen_at = CURRENT_TIMESTAMP
+        WHERE session_id = ?
+    """, (session_id,))
+    connection.commit()
+    connection.close()
+
+
+def update_active_session():
+    session_id = session.get("session_id")
+    if not session_id:
+        return True
+
+    connection = get_db_connection()
+    row = connection.execute("""
+        SELECT is_active FROM active_sessions
+        WHERE session_id = ?
+    """, (session_id,)).fetchone()
+
+    if row and row["is_active"] == 0:
+        connection.close()
+        return False
+
+    connection.execute("""
+        UPDATE active_sessions
+        SET last_seen_at = CURRENT_TIMESTAMP, current_shift = ?
+        WHERE session_id = ?
+    """, (get_today_shift(), session_id))
+    connection.commit()
+    connection.close()
+    return True
+
+
+def has_active_break_glass(patient_id):
+    grant = session.get(f"break_glass_{patient_id}")
+    if not isinstance(grant, dict):
+        return False
+
+    granted_at = grant.get("granted_at", 0)
+    age = datetime.now(timezone.utc).timestamp() - granted_at
+    if age > PATIENT_ACCESS_TTL_SECONDS:
+        session.pop(f"break_glass_{patient_id}", None)
+        return False
+    return True
+
+
+def activate_break_glass(patient_id, reason_detail):
+    session[f"break_glass_{patient_id}"] = {
+        "reason": BREAK_GLASS_REASON,
+        "detail": reason_detail,
+        "granted_at": datetime.now(timezone.utc).timestamp(),
+    }
+    unlock_patient_access(patient_id, BREAK_GLASS_REASON)
+
+
+def get_privacy_ampel(risk_score):
+    if risk_score >= 75:
+        return {
+            "color": "red",
+            "icon": "🔴",
+            "label": "Datenschutz-Ampel: kritisch",
+        }
+    if risk_score >= 40:
+        return {
+            "color": "yellow",
+            "icon": "🟡",
+            "label": "Datenschutz-Ampel: auffällig",
+        }
+    return {
+        "color": "green",
+        "icon": "🟢",
+        "label": "Datenschutz-Ampel: unkritisch",
+    }
+
+
+def classify_privacy_risk(score):
+    if score >= 90:
+        return "very_high"
+    if score >= 75:
+        return "high"
+    if score >= 40:
+        return "medium"
+    return "low"
+
+
+def assess_privacy_risk(username, role, patient_id, accessed_data, access_reason, action="view", connection=None):
+    owns_connection = connection is None
+    if connection is None:
+        connection = get_db_connection()
+
+    score = 20
+    reasons = []
+    normalized_reason = normalize_access_reason(access_reason)
+
+    patient = None
+    if patient_id is not None:
+        patient = connection.execute("""
+            SELECT patients.id, patients.privacy_level, patients.privacy_note,
+                   locations.station_id
+            FROM patients
+            LEFT JOIN current_patient_locations locations
+              ON locations.patient_id = patients.id
+            WHERE patients.id = ?
+        """, (patient_id,)).fetchone()
+
+    if role == "admin" and accessed_data not in {"Patientenbewegung", "Stammdaten"}:
+        score = max(score, 80)
+        reasons.append("Admin öffnet medizinische Daten")
+
+    if patient and patient["privacy_level"] in {"vip", "gesperrt", "restricted"}:
+        score = max(score, 95)
+        reasons.append("Zugriff auf VIP/gesperrten Patienten")
+
+    if role == "lab":
+        if accessed_data in {"Laborbefunde", "Laboranforderung", "Notfallfreigabe"} or "Labor" in (accessed_data or ""):
+            reasons.append("Labor öffnet Laborbereich")
+        else:
+            score = max(score, 75)
+            reasons.append("Laborzugriff außerhalb Laborbereich")
+
+    if role in DOCTOR_ROLES and patient and patient["station_id"] in get_accessible_station_ids():
+        reasons.append("Arzt öffnet eigenen Patienten")
+
+    if role in NURSE_ROLES and patient and patient["station_id"] in get_accessible_station_ids():
+        reasons.append("Pflege öffnet Patient auf eigener Station")
+
+    current_hour = datetime.now().hour
+    current_shift = get_today_shift()
+    if current_hour < 6 or current_hour >= 22:
+        if current_shift != "Nachtdienst":
+            score = max(score, 55)
+            reasons.append("Zugriff außerhalb normaler Arbeitszeit")
+
+    if normalized_reason == BREAK_GLASS_REASON:
+        break_glass_detail = ""
+        if patient_id is not None:
+            grant = session.get(f"break_glass_{patient_id}")
+            if isinstance(grant, dict):
+                break_glass_detail = grant.get("detail", "")
+        if len((break_glass_detail or "").strip()) < 20:
+            score = max(score, 80)
+            reasons.append("Notfallzugriff ohne genaue Begründung")
+        else:
+            score = max(score, 55)
+            reasons.append("Dokumentierter Notfallzugriff")
+
+    rapid_access = 0
+    if action == "view" and patient_id is not None:
+        rapid_access = connection.execute("""
+            SELECT COUNT(DISTINCT patient_id)
+            FROM access_logs
+            WHERE username = ?
+              AND patient_id IS NOT NULL
+              AND access_time >= datetime('now', '-10 minutes')
+        """, (username,)).fetchone()[0]
+        rapid_access = max(rapid_access, 0) + 1
+        if rapid_access >= 5:
+            score = max(score, 80)
+            reasons.append("User öffnet sehr viele Akten hintereinander")
+
+    if not reasons:
+        reasons.append("Regulärer Zugriff nach Rolle und Station")
+
+    level = classify_privacy_risk(score)
+    ampel = get_privacy_ampel(score)
+
+    if owns_connection:
+        connection.close()
+
+    return {
+        "score": score,
+        "level": level,
+        "reasons": reasons,
+        "ampel": ampel,
+        "rapid_access_count": rapid_access,
+    }
 def get_role_label(role):
     role_labels = {
         "assistenzarzt": "Assistenzarzt / Assistenzärztin",
@@ -565,9 +912,36 @@ def can_access_patient(patient_id):
         ).fetchone()
         connection.close()
         return patient is not None
+
+    if has_active_break_glass(patient_id):
+        patient = connection.execute(
+            "SELECT id FROM patients WHERE id = ?", (patient_id,)
+        ).fetchone()
+        connection.close()
+        return patient is not None
+
+    if session.get("role") == "lab" and has_unlocked_patient_access(patient_id):
+        patient = connection.execute(
+            "SELECT id FROM patients WHERE id = ?", (patient_id,)
+        ).fetchone()
+        connection.close()
+        return patient is not None
+
     patient = connection.execute("""
         SELECT station_id FROM current_patient_locations WHERE patient_id = ?
     """, (patient_id,)).fetchone()
+    if patient is None and is_doctor_role(session.get("role")):
+        historical_patient = connection.execute("""
+            SELECT id FROM patients
+            WHERE id = ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM admissions
+                  WHERE admissions.patient_id = patients.id
+                    AND admissions.discharged_at IS NULL
+              )
+        """, (patient_id,)).fetchone()
+        connection.close()
+        return historical_patient is not None
     connection.close()
     return patient is not None and can_access_station(patient["station_id"])
 
@@ -622,13 +996,58 @@ def permission_required(permission):
 
 def log_access(username, role, patient_id, patient_name, accessed_data, access_reason, action="view"):
     connection = get_db_connection()
+    normalized_reason = normalize_access_reason(access_reason)
+    privacy_risk = assess_privacy_risk(
+        username, role, patient_id, accessed_data, normalized_reason, action, connection
+    )
 
     connection.execute("""
         INSERT INTO access_logs (
-            username, role, patient_id, patient_name, accessed_data, access_reason, action
+            username, role, patient_id, patient_name, accessed_data,
+            access_reason, action, privacy_risk_score,
+            privacy_risk_level, privacy_risk_reasons
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (username, role, patient_id, patient_name, accessed_data, access_reason, action))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        username, role, patient_id, patient_name, accessed_data,
+        normalized_reason, action, privacy_risk["score"],
+        privacy_risk["level"], "; ".join(privacy_risk["reasons"]),
+    ))
+
+    if normalized_reason == BREAK_GLASS_REASON:
+        create_security_alert(
+            "break_glass",
+            f"Notfallzugriff auf Patient '{patient_name}' durch {username}.",
+            "critical",
+            username=username,
+            role=role,
+            patient_id=patient_id,
+            metadata={"accessed_data": accessed_data, "action": action},
+            connection=connection,
+        )
+
+    if action == "view" and patient_id is not None:
+        rapid_access = privacy_risk["rapid_access_count"]
+
+        if rapid_access >= 5:
+            recent_duplicate = connection.execute("""
+                SELECT COUNT(*)
+                FROM security_alerts
+                WHERE alert_type = 'rapid_patient_access'
+                  AND username = ?
+                  AND created_at >= datetime('now', '-10 minutes')
+            """, (username,)).fetchone()[0]
+
+            if recent_duplicate == 0:
+                create_security_alert(
+                    "rapid_patient_access",
+                    f"{username} hat in kurzer Zeit auf {rapid_access} verschiedene Patientenakten zugegriffen.",
+                    "warning",
+                    username=username,
+                    role=role,
+                    metadata={"patient_count": rapid_access},
+                    connection=connection,
+                )
 
     connection.commit()
     connection.close()
@@ -672,6 +1091,8 @@ def audit_patient_access(patient, accessed_data, action="view"):
 
 def require_patient_access(patient_id):
     if not can_access_patient(patient_id):
+        if session.get("role") in CLINICAL_ROLES:
+            return redirect(url_for("break_glass", patient_id=patient_id))
         abort(403)
 
     if not has_unlocked_patient_access(patient_id):
@@ -730,6 +1151,11 @@ def login():
         username = request.form["username"]
         password = request.form["password"]
 
+        locked_until = is_account_locked(username)
+        if locked_until:
+            error = f"Zu viele fehlgeschlagene Loginversuche. Konto bis {locked_until.strftime('%H:%M:%S')} gesperrt."
+            return render_template("login.html", error=error)
+
         connection = get_db_connection()
 
         user = connection.execute("""
@@ -750,11 +1176,18 @@ def login():
             session["user_id"] = user["id"]
             session.permanent = True
             session["last_activity"] = datetime.now().isoformat()
+            reset_login_failures(user["username"])
+            register_active_session(user)
 
             if user["role"] in SHIFT_ROLES:
                 return redirect(url_for("choose_shift"))
 
             return redirect(url_for("dashboard"))
+
+        locked_until = record_failed_login(username)
+        if locked_until:
+            error = f"Zu viele fehlgeschlagene Loginversuche. Konto bis {locked_until.strftime('%H:%M:%S')} gesperrt."
+            return render_template("login.html", error=error)
 
         error = "Falscher Benutzername oder falsches Passwort."
 
@@ -786,6 +1219,7 @@ def choose_shift():
 
         connection.commit()
         connection.close()
+        update_active_session()
 
         return redirect(url_for("dashboard"))
 
@@ -822,6 +1256,8 @@ def dashboard():
 
     user_count = safe_count("SELECT COUNT(*) FROM users")
     access_logs_count = safe_count("SELECT COUNT(*) FROM access_logs")
+    open_security_alerts_count = safe_count("SELECT COUNT(*) FROM security_alerts WHERE status = 'open'")
+    active_sessions_count = safe_count("SELECT COUNT(*) FROM active_sessions WHERE is_active = 1")
 
     open_orders_count = 0
     open_medications_count = 0
@@ -1068,6 +1504,8 @@ def dashboard():
         open_medications_count=open_medications_count,
         open_notifications_count=open_notifications_count,
         access_logs_count=access_logs_count,
+        open_security_alerts_count=open_security_alerts_count,
+        active_sessions_count=active_sessions_count,
         current_shift=current_shift,
         stations=stations,
         is_doctor=is_doctor_role(role),
@@ -1169,6 +1607,123 @@ def patients():
         search_query=search_query
     )
 
+
+@app.route("/historical_patients")
+def historical_patients():
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if not (is_doctor_role(session.get("role")) or session.get("role") == "admin"):
+        abort(403)
+
+    search_query = request.args.get("search", "").strip()
+    connection = get_db_connection()
+
+    query = """
+        SELECT
+            patients.*,
+            admissions.id AS admission_id,
+            admissions.admitted_at,
+            admissions.discharged_at,
+            admissions.discharge_reason,
+            stations.station_number,
+            rooms.room_number,
+            beds.bed_label,
+            discharged_by.username AS discharged_by
+        FROM patients
+        JOIN admissions ON admissions.patient_id = patients.id
+        JOIN stations ON stations.id = admissions.station_id
+        JOIN rooms ON rooms.id = admissions.room_id
+        JOIN beds ON beds.id = admissions.bed_id
+        LEFT JOIN users discharged_by ON discharged_by.id = admissions.discharged_by_user_id
+        WHERE admissions.discharged_at IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM admissions active
+              WHERE active.patient_id = patients.id
+                AND active.discharged_at IS NULL
+          )
+    """
+    parameters = []
+
+    if search_query:
+        query += " AND patients.name LIKE ?"
+        parameters.append(f"%{search_query}%")
+
+    query += " ORDER BY admissions.discharged_at DESC"
+    historical_list = connection.execute(query, parameters).fetchall()
+    connection.close()
+
+    return render_template(
+        "historical_patients.html",
+        patients=historical_list,
+        search_query=search_query,
+    )
+
+
+@app.route("/patient/<int:patient_id>/break_glass", methods=["GET", "POST"])
+def break_glass(patient_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if session.get("role") not in CLINICAL_ROLES:
+        abort(403)
+
+    connection = get_db_connection()
+    patient = connection.execute("""
+        SELECT
+            patients.*,
+            locations.station_number,
+            locations.room_number,
+            locations.bed_label
+        FROM patients
+        LEFT JOIN current_patient_locations locations
+          ON locations.patient_id = patients.id
+        WHERE patients.id = ?
+    """, (patient_id,)).fetchone()
+
+    if patient is None:
+        connection.close()
+        abort(404)
+
+    error = None
+    if request.method == "POST":
+        reason_detail = request.form.get("reason_detail", "").strip()
+        confirm = request.form.get("confirm_break_glass")
+
+        if confirm != "yes" or len(reason_detail) < 8:
+            error = "Bitte den Notfallzugriff bewusst bestätigen und eine nachvollziehbare Begründung eintragen."
+        else:
+            activate_break_glass(patient_id, reason_detail)
+            create_security_alert(
+                "break_glass_activated",
+                f"Break-glass wurde für Patient '{patient['name']}' aktiviert.",
+                "critical",
+                patient_id=patient_id,
+                metadata={
+                    "reason_detail": reason_detail,
+                    "station": patient["station_number"],
+                    "room": patient["room_number"],
+                },
+                connection=connection,
+            )
+            connection.commit()
+            connection.close()
+
+            log_access(
+                session["username"],
+                session["role"],
+                patient_id,
+                patient["name"],
+                "Notfallfreigabe",
+                BREAK_GLASS_REASON,
+                "break_glass",
+            )
+            return redirect(url_for("patient_detail", patient_id=patient_id))
+
+    connection.close()
+    return render_template("break_glass.html", patient=patient, error=error)
+
+
 @app.route("/patient/<int:patient_id>", methods=["GET", "POST"])
 def patient_detail(patient_id):
     if "username" not in session:
@@ -1178,6 +1733,8 @@ def patient_detail(patient_id):
         abort(403)
 
     if not can_access_patient(patient_id):
+        if session.get("role") in CLINICAL_ROLES:
+            return redirect(url_for("break_glass", patient_id=patient_id))
         abort(403)
 
     connection = get_db_connection()
@@ -1316,7 +1873,7 @@ def patient_detail(patient_id):
                     break
 
             time_col = None
-            for col in ["timestamp", "created_at", "accessed_at", "created_on", "time"]:
+            for col in ["access_time", "timestamp", "created_at", "accessed_at", "created_on", "time"]:
                 if col in columns:
                     time_col = col
                     break
@@ -1332,7 +1889,10 @@ def patient_detail(patient_id):
                     username,
                     role,
                     {reason_expr} AS reason,
-                    {time_expr} AS timestamp
+                    {time_expr} AS timestamp,
+                    privacy_risk_score,
+                    privacy_risk_level,
+                    privacy_risk_reasons
                 FROM access_logs
                 WHERE patient_id = ?
                 ORDER BY {order_expr}
@@ -1341,6 +1901,7 @@ def patient_detail(patient_id):
         access_logs = []
 
     access_unlocked = has_unlocked_patient_access(patient_id)
+    privacy_risk = None
     handover_notes = []
     lab_files_by_report = {}
     if not access_unlocked:
@@ -1352,6 +1913,15 @@ def patient_detail(patient_id):
         access_logs = []
         patient_warnings = []
     else:
+        privacy_risk = assess_privacy_risk(
+            session["username"],
+            session["role"],
+            patient_id,
+            "Patientenakte",
+            get_patient_access_reason(patient_id),
+            "view",
+            connection,
+        )
         if session["role"] != "admin":
             access_logs = []
 
@@ -1396,6 +1966,7 @@ def patient_detail(patient_id):
         access_unlocked=access_unlocked,
         show_access_logs=session["role"] == "admin",
         allowed_access_reasons=ROLE_ACCESS_REASONS.get(session["role"], ()),
+        privacy_risk=privacy_risk,
     )
 @app.route("/patient/<int:patient_id>/arztbrief", methods=["GET", "POST"])
 def arztbrief(patient_id):
@@ -1445,7 +2016,7 @@ def arztbrief(patient_id):
 
         audit_patient_access(patient, "Arztbrief", "create")
 
-        return redirect(url_for("patient_detail", patient_id=patient_id))
+        return redirect(url_for("arztbrief", patient_id=patient_id, published=1))
 
     draft = connection.execute("""
         SELECT content FROM drafts
@@ -1454,12 +2025,19 @@ def arztbrief(patient_id):
 
     draft_content = draft["content"] if draft else ""
 
+    current_admission = connection.execute("""
+        SELECT * FROM current_patient_locations
+        WHERE patient_id = ?
+    """, (patient_id,)).fetchone()
+
     connection.close()
 
     return render_template(
         "arztbrief.html",
         patient=patient,
-        draft_content=draft_content
+        draft_content=draft_content,
+        current_admission=current_admission,
+        published=request.args.get("published") == "1",
     )
 
 
@@ -1490,6 +2068,69 @@ def autosave_draft():
     connection.close()
 
     return {"success": True}
+
+
+@app.route("/patient/<int:patient_id>/doctor_discharge", methods=["POST"])
+def doctor_discharge(patient_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if not is_doctor_role(session.get("role")):
+        abort(403)
+
+    access_check = require_patient_access(patient_id)
+    if access_check:
+        return access_check
+
+    reason = request.form.get("reason", "").strip()
+    if not reason or len(reason) > 500:
+        return "Ein nachvollziehbarer Entlassungsgrund ist erforderlich.", 400
+
+    connection = get_db_connection()
+    patient = connection.execute("""
+        SELECT patients.*, locations.admission_id
+        FROM patients
+        JOIN current_patient_locations locations
+          ON locations.patient_id = patients.id
+        WHERE patients.id = ?
+    """, (patient_id,)).fetchone()
+
+    if not patient:
+        connection.close()
+        return "Patient ist aktuell nicht stationär aufgenommen.", 409
+
+    latest_letter = connection.execute("""
+        SELECT id FROM doctor_letters
+        WHERE patient_id = ? AND author_user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+    """, (patient_id, get_session_user_id())).fetchone()
+
+    if not latest_letter:
+        connection.close()
+        return "Vor der Entlassung muss ein Arztbrief gespeichert werden.", 400
+
+    connection.execute("""
+        UPDATE admissions
+        SET discharged_at = CURRENT_TIMESTAMP,
+            discharged_by_user_id = ?,
+            discharge_reason = ?
+        WHERE id = ? AND discharged_at IS NULL
+    """, (get_session_user_id(), reason, patient["admission_id"]))
+    connection.commit()
+    connection.close()
+
+    log_access(
+        session["username"],
+        session["role"],
+        patient_id,
+        patient["name"],
+        "Entlassung nach Arztbrief",
+        get_patient_access_reason(patient_id),
+        "discharge",
+    )
+
+    return redirect(url_for("historical_patients"))
 
 
 @app.route("/doctor_drafts")
@@ -1649,7 +2290,7 @@ def logs():
             break
 
     time_col = None
-    for col in ["timestamp", "created_at", "accessed_at", "created_on", "time"]:
+    for col in ["access_time", "timestamp", "created_at", "accessed_at", "created_on", "time"]:
         if col in columns:
             time_col = col
             break
@@ -1658,6 +2299,9 @@ def logs():
     role_expr = f"access_logs.{role_col}" if role_col else "''"
     reason_expr = f"access_logs.{reason_col}" if reason_col else "''"
     time_expr = f"access_logs.{time_col}" if time_col else "''"
+    risk_score_expr = "access_logs.privacy_risk_score" if "privacy_risk_score" in columns else "0"
+    risk_level_expr = "access_logs.privacy_risk_level" if "privacy_risk_level" in columns else "'low'"
+    risk_reasons_expr = "access_logs.privacy_risk_reasons" if "privacy_risk_reasons" in columns else "''"
 
     # Patient entweder über patient_id joinen oder direkt patient_name nutzen
     patient_join = ""
@@ -1676,7 +2320,10 @@ def logs():
             {role_expr} AS role,
             {patient_expr} AS patient_name,
             {reason_expr} AS reason,
-            {time_expr} AS timestamp
+            {time_expr} AS timestamp,
+            {risk_score_expr} AS privacy_risk_score,
+            {risk_level_expr} AS privacy_risk_level,
+            {risk_reasons_expr} AS privacy_risk_reasons
         FROM access_logs
         {patient_join}
         WHERE 1 = 1
@@ -1732,6 +2379,114 @@ def logs():
     )
 
 
+@app.route("/security")
+def security_dashboard():
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "admin":
+        abort(403)
+
+    connection = get_db_connection()
+
+    active_sessions = connection.execute("""
+        SELECT *
+        FROM active_sessions
+        WHERE is_active = 1
+        ORDER BY last_seen_at DESC
+    """).fetchall()
+
+    security_alerts = connection.execute("""
+        SELECT security_alerts.*, patients.name AS patient_name
+        FROM security_alerts
+        LEFT JOIN patients ON patients.id = security_alerts.patient_id
+        ORDER BY
+            CASE security_alerts.severity
+                WHEN 'critical' THEN 1
+                WHEN 'warning' THEN 2
+                ELSE 3
+            END,
+            security_alerts.created_at DESC
+        LIMIT 80
+    """).fetchall()
+
+    failed_login_summary = connection.execute("""
+        SELECT
+            username,
+            COUNT(*) AS attempts,
+            MAX(attempted_at) AS last_attempt
+        FROM failed_login_attempts
+        WHERE success = 0
+          AND attempted_at >= datetime('now', '-24 hours')
+        GROUP BY username
+        ORDER BY attempts DESC, last_attempt DESC
+        LIMIT 20
+    """).fetchall()
+
+    lockouts = connection.execute("""
+        SELECT *
+        FROM account_lockouts
+        WHERE locked_until IS NOT NULL
+        ORDER BY locked_until DESC
+    """).fetchall()
+
+    metrics = {
+        "active_sessions": len(active_sessions),
+        "open_alerts": sum(1 for alert in security_alerts if alert["status"] == "open"),
+        "critical_alerts": sum(1 for alert in security_alerts if alert["severity"] == "critical" and alert["status"] == "open"),
+        "failed_logins_24h": sum(row["attempts"] for row in failed_login_summary),
+    }
+
+    connection.close()
+
+    return render_template(
+        "security.html",
+        active_sessions=active_sessions,
+        security_alerts=security_alerts,
+        failed_login_summary=failed_login_summary,
+        lockouts=lockouts,
+        metrics=metrics,
+    )
+
+
+@app.route("/security/session/<session_id>/close", methods=["POST"])
+def close_security_session(session_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "admin":
+        abort(403)
+
+    connection = get_db_connection()
+    connection.execute("""
+        UPDATE active_sessions
+        SET is_active = 0, last_seen_at = CURRENT_TIMESTAMP
+        WHERE session_id = ?
+    """, (session_id,))
+    connection.commit()
+    connection.close()
+    return redirect(url_for("security_dashboard"))
+
+
+@app.route("/security/alert/<int:alert_id>/close", methods=["POST"])
+def close_security_alert(alert_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "admin":
+        abort(403)
+
+    connection = get_db_connection()
+    connection.execute("""
+        UPDATE security_alerts
+        SET status = 'closed'
+        WHERE id = ?
+    """, (alert_id,))
+    connection.commit()
+    connection.close()
+    return redirect(url_for("security_dashboard"))
+
+
 @app.route("/add_user", methods=["GET", "POST"])
 def add_user():
     if "username" not in session:
@@ -1782,7 +2537,12 @@ def users():
     connection = get_db_connection()
 
     user_list = connection.execute("""
-        SELECT id, username, role, is_active FROM users
+        SELECT users.id, users.username, users.role, users.is_active,
+               account_lockouts.locked_until,
+               account_lockouts.failed_count
+        FROM users
+        LEFT JOIN account_lockouts
+          ON account_lockouts.username = users.username
         ORDER BY id
     """).fetchall()
 
@@ -2134,6 +2894,87 @@ def toggle_user(user_id):
     connection.close()
 
     return redirect(url_for("users"))
+
+
+@app.route("/unlock_user/<int:user_id>", methods=["POST"])
+def unlock_user(user_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if not has_permission(session["role"], "users.manage"):
+        abort(403)
+
+    connection = get_db_connection()
+    user = connection.execute(
+        "SELECT username FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+
+    if not user:
+        connection.close()
+        abort(404)
+
+    connection.execute("""
+        INSERT INTO account_lockouts (username, failed_count, locked_until, updated_at)
+        VALUES (?, 0, NULL, CURRENT_TIMESTAMP)
+        ON CONFLICT(username) DO UPDATE SET
+            failed_count = 0,
+            locked_until = NULL,
+            updated_at = CURRENT_TIMESTAMP
+    """, (user["username"],))
+    create_security_alert(
+        "account_unlocked",
+        f"Admin hat Benutzerkonto '{user['username']}' entsperrt.",
+        "info",
+        username=user["username"],
+        connection=connection,
+    )
+    connection.commit()
+    connection.close()
+
+    return redirect(url_for("users"))
+
+
+@app.route("/patient/<int:patient_id>/privacy", methods=["POST"])
+def update_patient_privacy(patient_id):
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "admin":
+        abort(403)
+
+    privacy_level = request.form.get("privacy_level", "normal")
+    privacy_note = request.form.get("privacy_note", "").strip()
+
+    if privacy_level not in {"normal", "vip", "gesperrt"}:
+        return "Ungültige Datenschutz-Markierung.", 400
+
+    connection = get_db_connection()
+    patient = connection.execute(
+        "SELECT name FROM patients WHERE id = ?", (patient_id,)
+    ).fetchone()
+    if not patient:
+        connection.close()
+        abort(404)
+
+    connection.execute("""
+        UPDATE patients
+        SET privacy_level = ?, privacy_note = ?
+        WHERE id = ?
+    """, (privacy_level, privacy_note, patient_id))
+    connection.commit()
+    connection.close()
+
+    log_access(
+        session["username"],
+        session["role"],
+        patient_id,
+        patient["name"],
+        "Datenschutz-Markierung",
+        "Administrative Prüfung",
+        "privacy_update",
+    )
+
+    return redirect(url_for("patient_location", patient_id=patient_id))
 
 
 @app.route("/add_patient", methods=["GET", "POST"])
@@ -3358,6 +4199,7 @@ def add_lab_report(patient_id):
 
 @app.route("/logout")
 def logout():
+    deactivate_current_session()
     session.clear()
     return redirect(url_for("login"))
 

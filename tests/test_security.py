@@ -62,6 +62,53 @@ class WardAccessTests(unittest.TestCase):
         self.assertIn(b"Station:</strong> 48", response.data)
         self.assertIn(b"Station:</strong> 49", response.data)
 
+    def test_station_doctors_only_see_assigned_ward_unless_night_shift(self):
+        connection = hospital_app.get_db_connection()
+        arzt48 = connection.execute(
+            "SELECT id FROM users WHERE username = 'arzt48'"
+        ).fetchone()["id"]
+        arzt49 = connection.execute(
+            "SELECT id FROM users WHERE username = 'arzt49'"
+        ).fetchone()["id"]
+        connection.close()
+
+        with self.client.session_transaction() as session:
+            session["username"] = "arzt48"
+            session["role"] = "assistenzarzt"
+            session["user_id"] = arzt48
+        response = self.client.get("/patients")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Station:</strong> 48", response.data)
+        self.assertNotIn(b"Station:</strong> 49", response.data)
+
+        with self.client.session_transaction() as session:
+            session["username"] = "arzt49"
+            session["role"] = "assistenzarzt"
+            session["user_id"] = arzt49
+        response = self.client.get("/patients")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Station:</strong> 49", response.data)
+        self.assertNotIn(b"Station:</strong> 48", response.data)
+
+        connection = hospital_app.get_db_connection()
+        connection.execute("""
+            INSERT INTO duty_shifts (user_id, duty_date, shift_type)
+            VALUES (?, ?, 'Nachtdienst')
+            ON CONFLICT(user_id, duty_date) DO UPDATE SET
+                shift_type = excluded.shift_type
+        """, (arzt48, date.today().isoformat()))
+        connection.commit()
+        connection.close()
+
+        with self.client.session_transaction() as session:
+            session["username"] = "arzt48"
+            session["role"] = "assistenzarzt"
+            session["user_id"] = arzt48
+        response = self.client.get("/patients")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Station:</strong> 48", response.data)
+        self.assertIn(b"Station:</strong> 49", response.data)
+
     def test_station_nurses_only_see_their_own_ward(self):
         with self.client.session_transaction() as session:
             session["username"] = "pflege"
@@ -288,6 +335,203 @@ class PatientLifecycleTests(unittest.TestCase):
         )
         connection.commit()
         connection.close()
+
+    def test_failed_login_lockout_creates_security_alert(self):
+        for _ in range(hospital_app.MAX_FAILED_LOGIN_ATTEMPTS):
+            with self.client.session_transaction() as session:
+                session["csrf_token"] = "test-token"
+            response = self.client.post(
+                "/login",
+                data={
+                    "username": "ghost_user",
+                    "password": "wrong",
+                    "csrf_token": "test-token",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+
+        self.assertIn("Zu viele fehlgeschlagene Loginversuche".encode(), response.data)
+
+        connection = hospital_app.get_db_connection()
+        lockout = connection.execute("""
+            SELECT * FROM account_lockouts
+            WHERE username = 'ghost_user' AND locked_until IS NOT NULL
+        """).fetchone()
+        alert = connection.execute("""
+            SELECT * FROM security_alerts
+            WHERE alert_type = 'failed_login_lockout'
+              AND username = 'ghost_user'
+            ORDER BY id DESC
+        """).fetchone()
+        connection.close()
+
+        self.assertIsNotNone(lockout)
+        self.assertIsNotNone(alert)
+
+    def test_admin_security_dashboard_renders_and_non_admin_is_blocked(self):
+        with self.client.session_transaction() as session:
+            session["username"] = "admin"
+            session["role"] = "admin"
+            session["user_id"] = 4
+            session["csrf_token"] = "test-token"
+
+        response = self.client.get("/security")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Security Dashboard", response.data)
+        self.assertIn("Aktive Sitzungen".encode(), response.data)
+
+        with self.client.session_transaction() as session:
+            session["username"] = "pflege"
+            session["role"] = "nurse_48"
+            session["user_id"] = 2
+            session["csrf_token"] = "test-token"
+
+        response = self.client.get("/security")
+        self.assertEqual(response.status_code, 403)
+
+    def test_break_glass_allows_documented_emergency_access(self):
+        with self.client.session_transaction() as session:
+            session["username"] = "pflege"
+            session["role"] = "nurse_48"
+            session["user_id"] = 2
+            session["csrf_token"] = "test-token"
+
+        response = self.client.get("/patient/2")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/patient/2/break_glass", response.headers["Location"])
+
+        response = self.client.post(
+            "/patient/2/break_glass",
+            data={
+                "csrf_token": "test-token",
+                "reason_detail": "Akute Notfallsituation mit sofortigem Informationsbedarf.",
+                "confirm_break_glass": "yes",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response = self.client.get("/patient/2")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Anna Schmidt", response.data)
+
+        connection = hospital_app.get_db_connection()
+        alert = connection.execute("""
+            SELECT * FROM security_alerts
+            WHERE patient_id = 2
+              AND alert_type IN ('break_glass', 'break_glass_activated')
+            ORDER BY id DESC
+        """).fetchone()
+        log = connection.execute("""
+            SELECT * FROM access_logs
+            WHERE patient_id = 2
+              AND access_reason = ?
+            ORDER BY id DESC
+        """, (hospital_app.BREAK_GLASS_REASON,)).fetchone()
+        connection.close()
+
+        self.assertIsNotNone(alert)
+        self.assertIsNotNone(log)
+
+    def test_admin_can_unlock_locked_user(self):
+        connection = hospital_app.get_db_connection()
+        connection.execute("""
+            INSERT INTO account_lockouts (username, failed_count, locked_until)
+            VALUES ('arzt', 5, '2099-01-01T00:00:00')
+            ON CONFLICT(username) DO UPDATE SET
+                failed_count = 5,
+                locked_until = '2099-01-01T00:00:00'
+        """)
+        connection.commit()
+        connection.close()
+
+        self.login_admin()
+        response = self.client.post(
+            "/unlock_user/1",
+            data={"csrf_token": "test-token"},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        connection = hospital_app.get_db_connection()
+        lockout = connection.execute("""
+            SELECT failed_count, locked_until
+            FROM account_lockouts
+            WHERE username = 'arzt'
+        """).fetchone()
+        connection.close()
+
+        self.assertEqual(lockout["failed_count"], 0)
+        self.assertIsNone(lockout["locked_until"])
+
+    def test_vip_patient_creates_critical_privacy_risk(self):
+        connection = hospital_app.get_db_connection()
+        connection.execute("""
+            UPDATE patients
+            SET privacy_level = 'vip', privacy_note = 'Prominenter Patient'
+            WHERE id = 1
+        """)
+        connection.commit()
+        connection.close()
+
+        with self.client.session_transaction() as session:
+            session["username"] = "arzt"
+            session["role"] = "assistenzarzt"
+            session["user_id"] = 1
+            session["csrf_token"] = "test-token"
+            session["patient_access_1"] = {
+                "reason": "Behandlung",
+                "granted_at": time.time(),
+            }
+
+        response = self.client.get("/patient/1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Datenschutz-Ampel: kritisch".encode(), response.data)
+
+    def test_doctor_can_discharge_patient_after_arztbrief(self):
+        with self.client.session_transaction() as session:
+            session["username"] = "arzt"
+            session["role"] = "assistenzarzt"
+            session["user_id"] = 1
+            session["csrf_token"] = "test-token"
+            session["patient_access_1"] = {
+                "reason": "Behandlung",
+                "granted_at": time.time(),
+            }
+
+        response = self.client.post(
+            "/patient/1/arztbrief",
+            data={
+                "csrf_token": "test-token",
+                "title": "Arztbrief",
+                "arztbrief_content": "Patient stabil, Entlassung möglich.",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("published=1", response.headers["Location"])
+
+        response = self.client.post(
+            "/patient/1/doctor_discharge",
+            data={
+                "csrf_token": "test-token",
+                "reason": "Entlassung nach abgeschlossenem Arztbrief.",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/historical_patients", response.headers["Location"])
+
+        connection = hospital_app.get_db_connection()
+        current_location = connection.execute("""
+            SELECT * FROM current_patient_locations
+            WHERE patient_id = 1
+        """).fetchone()
+        discharged = connection.execute("""
+            SELECT * FROM admissions
+            WHERE patient_id = 1 AND discharged_at IS NOT NULL
+            ORDER BY id DESC
+        """).fetchone()
+        connection.close()
+
+        self.assertIsNone(current_location)
+        self.assertIsNotNone(discharged)
 
     def test_lab_can_create_advanced_report_with_image(self):
         upload_dir = Path(self.temp_dir.name) / "lab_uploads"
